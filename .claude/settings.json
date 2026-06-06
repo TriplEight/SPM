@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(algokit:*)",
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(node:*)",
+      "Bash(tsx:*)",
+      "Bash(git:*)",
+      "Bash(curl:*)",
+      "Bash(sqlite3:*)",
+      "Read",
+      "Write",
+      "Edit",
+      "Grep",
+      "Glob"
+    ],
+    "deny": [
+      "Bash(rm -rf /*)",
+      "Bash(git push --force:*)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "env": {
+    "USDC_ASA_ID": "10458941",
+    "ALGOD_SERVER": "https://testnet-api.algonode.cloud"
+  }
+}
