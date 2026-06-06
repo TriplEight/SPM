@@ -21,3 +21,12 @@ Status tiers (subset): UNREVIEWED(default,free) → AUTO_SCANNED(free) →
 COMMUNITY_REVIEWED(paid) → PEER_REVIEWED(paid). Version bump auto-resets to UNREVIEWED.
 
 API: GET /api/v1/status/:pkg/:version → { status, auditor_addr, attest_txid, ts }.
+
+Adoption ("no migration"): consumers point npm at the proxy via `.npmrc`
+`registry=<proxy-url>` or `npm install --registry <proxy-url>`. Packages resolve through
+the overlay; free-tier installs are byte-identical to npm. The MCP/CLI just target the
+proxy URL. For the demo the proxy is localhost.
+
+Audit lifecycle and how on-chain attest() relates to the SQLite row: see
+docs/scope-map.md ("Audit lifecycle"). Short version: attest() writes the box (source of
+truth); the proxy mirrors status into SQLite for hot-path reads; install reads SQLite.

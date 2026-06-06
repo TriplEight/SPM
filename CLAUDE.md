@@ -2,6 +2,7 @@
 
 @AGENTS.md
 @docs/architecture.md
+@docs/scope-map.md
 
 ## What we are building (12h hackathon MVP)
 An npm-compatible **registry overlay** where **human-audited** packages cost a
@@ -27,8 +28,14 @@ calls and pays for autonomously.
 - Network ids are CAIP-2: import `ALGORAND_TESTNET_CAIP2` from `@x402-avm/avm`.
 - TestNet USDC ASA id = **10458941** (`USDC_TESTNET_ASA_ID`), 6 decimals.
 - x402 scheme = `"exact"`. Amounts are micro-units strings. $0.001 = "1000".
-- Split of 1000 µUSDC = 500/200/150/100/50 (sums to 1000, no remainder).
+- Split of 1000 µUSDC = 500/200/150/100/50 (auditor/maintainer/adversarial/treasury/ops).
+  CANONICAL split is **50/20/15/10/5**. The source doc also shows a stale **70/20/10**
+  three-way split — that is OBSOLETE; always use the five-way 50/20/15/10/5.
 - Contract = Algorand TypeScript (Puya-TS) via AlgoKit; LocalNet then TestNet.
+- Adoption mechanic ("no migration") = point npm at the proxy: `.npmrc` `registry=<proxy>`
+  or `npm install --registry <proxy>`. The proxy is the overlay; npm is unchanged.
+- A package gets PAID status only via an on-chain `attest()`; SQLite mirrors it. See the
+  audit lifecycle in docs/scope-map.md. For the demo we seed both (DB row + attest box).
 
 ## Repo map
 - `contracts/` AlgoKit TS — `SplitRouter` (pay/attest/setRecipients) + scripts.

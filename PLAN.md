@@ -1,4 +1,84 @@
-# SPM MVP Implementation Plan
+# SPM — Sprint Overview & Implementation Plan
+
+Driven by Claude Code. Humans steer + review; the bottleneck is integration and
+on-chain debugging, not typing — so the back half is integration-heavy by design.
+
+## Roles
+- **Dev B — Contracts & chain.** Owns `contracts/`, deploy, opt-ins, on-chain verify.
+  Primary subagent: `algorand-contract-engineer`. On the **critical path** to hr8.
+- **Dev A — Proxy, x402, MCP, CLI.** Owns `proxy/`, `mcp/`, `cli/`.
+  Subagents: `x402-proxy-engineer`, then `mcp-payer-engineer`.
+- Both invoke `scope-sentinel` before any sizable new piece, and `integration-tester`
+  at sync points. Use `/handoff <summary>` after each block — it logs to `NOTES.md`.
+
+## Key scheduling decisions (read first)
+1. **Staggered start.** Dev B scaffolds the repo (`algokit init`, `bootstrap.sh`, first
+   commit + push) while Dev A installs local prereqs in parallel. Then Dev A pulls.
+2. **Dev A is never blocked on the real contract.** Build the proxy + MCP against a
+   **mock SplitRouter on LocalNet** (hardcoded app id, pay() that just accepts the
+   group). Swap to the real TestNet `APP_ID/ADDRESS/ABI` at the hr8 handoff.
+3. **Facilitator is a flag, not a fork.** Implement direct `algosdk` submit (Path B) as
+   the default-safe path; wire GoPlausible (Path A) behind `FACILITATOR_URL`. Decide
+   which you demo at hr3 — never let it block.
+
+## Sync points (definition of done)
+- **S1 @ H1** — Proxy passes `npm install` through to npmjs; SplitRouter compiles on LocalNet.
+- **S2 @ H3** — 402 round-trip works against the mock app; pay() splits correctly on
+  LocalNet (split-sum test green); facilitator go/no-go decided.
+- **S3 @ H8** — SplitRouter on **TestNet**, 5 recipients opted-in; `APP_ID/ADDRESS/ABI`
+  handed to Dev A; MCP `install_audited_package` builds the group against the real app.
+- **S4 @ H10** — Full E2E green: agent → 402 → autonomous pay → **5 inner transfers on
+  Lora** → tarball installs. Remaining time = polish / EURD bonus / demo video.
+
+---
+
+## Dev A — Proxy / x402 / MCP / CLI
+
+| Hr | Block | Driver |
+|----|-------|--------|
+| H0–1 | Hono skeleton; transparent passthrough to `registry.npmjs.org`. **→ S1** | `x402-proxy-engineer` |
+| H1–3 | SQLite `audit_status` store; `/api/v1/status/:pkg/:version`; auto-reset; 402 branch vs mock app. Decide facilitator path. `/seed`. **→ S2** | `x402-proxy-engineer` |
+| H3–6 | **MCP server (hero path):** `check_audit_status` + `install_audited_package` (402 → atomic group → sign → retry → tarball + attest txid), vs mock/LocalNet. | `mcp-payer-engineer` |
+| H6–8 | Settlement wiring: confirmation gating + verify 5 inner txns before 200. Path B default; Path A behind flag. | `mcp-payer-engineer` |
+| H8–10 | **Swap mock → real TestNet** APP_ID/ADDRESS/ABI from Dev B; full integration; `spm` CLI. **→ S4** | `mcp-payer-engineer` + pair w/ B |
+| H10–12 | Harden error paths (timeout, underpay, already-installed); demo rehearsal; buffer. | — |
+
+## Dev B — Contracts / chain
+
+| Hr | Block | Driver |
+|----|-------|--------|
+| H0–1 | (after push) SplitRouter skeleton; LocalNet up; global state (5 addrs + ASSET_ID); `setRecipients`. SplitRouter compiles. **→ S1** | `algorand-contract-engineer` |
+| H1–4 | `pay(payment, pkg, ver)`: asset/receiver/amount asserts + 5 inner axfers 500/200/150/100/50 + log. Tests: split-sum, reject wrong asset/amount/receiver. `/deploy` on LocalNet. **→ S2** | `algorand-contract-engineer` |
+| H4–6 | `attest()` + box storage; `contracts/scripts/setup.ts` = deploy + setRecipients + **opt-in app & all 5 recipients** into USDC ASA. | `algorand-contract-engineer` |
+| H6–8 | Deploy to **TestNet**; verify opt-ins; print + write APP_ID/APP_ADDRESS to `.env`; **hand ABI to Dev A**. `/deploy`. **→ S3** | `algorand-contract-engineer` |
+| H8–10 | Pair on integration; write on-chain verify helper (read group → assert 5 inner amounts) for `integration-tester`; `/e2e`. **→ S4** | `integration-tester` |
+| H10–12 | **EURD bonus** (only if S4 green + ≤30 min): opt recipients into EURD ASA, `setRecipients(…, eurdAssetId)`, add a 2nd priced route. Else: record backup demo video. | `algorand-contract-engineer` |
+
+---
+
+## Optional stronger demo (only if S4 is comfortably green)
+Add a live audit beat: MCP `submit_audit({pkg,ver})` (or `spm audit`) that calls
+`attest()` on-chain, flips the status to COMMUNITY_REVIEWED, and then the next install
+is paid — shown live instead of pre-seeded.
+
+## Descope ladder (if behind at H8/H10) — cut top-down
+1. Drop **EURD bonus** (already conditional).
+2. Drop **`spm` CLI** → MCP-only demo.
+3. Drop **GoPlausible facilitator** → direct `algosdk` submit (already the safe default).
+4. Drop **`attest()` box** → synthesize the `X-AUDIT-ATTESTATION` header from SQLite.
+5. **Never cut the 5-way on-chain split** — that's the thesis.
+
+## Demo runtime checklist (H11)
+- [ ] Free install of an UNREVIEWED package — instant, no wallet.
+- [ ] `install_audited_package("lodash","<ver>")` → 402 → autonomous pay → tarball.
+- [ ] Lora open on the settlement txn showing 5 inner transfers 500/200/150/100/50.
+- [ ] `curl /api/v1/status/lodash/<ver>` → status + attest txid.
+- [ ] Version-bump line: status resets to UNREVIEWED → "that's the injection point."
+- [ ] Backup video recorded and on disk.
+
+---
+
+# Detailed Implementation Tasks
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
