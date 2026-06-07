@@ -21,15 +21,24 @@ if [ -z "${SPLIT_APP_ID:-}" ] || [ -z "${PAYER_MNEMONIC:-}" ]; then
   exit 1
 fi
 
+# Kill any stale proxy on port 4873 before starting ours
+fuser -k 4873/tcp 2>/dev/null || true
+sleep 1
+
 # Start proxy in background with a demo-specific DB
 export SQLITE_PATH=/tmp/spm_demo_$(date +%s).db
 pnpm --dir "$ROOT/proxy" start >"$ROOT/proxy/demo-proxy.log" 2>&1 &
 PROXY_PID=$!
 trap 'kill "$PROXY_PID" 2>/dev/null; echo "Proxy stopped."' EXIT
 
-# Wait for proxy to be ready (up to 15s)
+# Wait for proxy to be ready (up to 15s); fail if our process died
 echo "Starting proxy..."
 for i in $(seq 1 30); do
+  if ! kill -0 "$PROXY_PID" 2>/dev/null; then
+    echo "ERROR: proxy failed to start. Check proxy/demo-proxy.log"
+    cat "$ROOT/proxy/demo-proxy.log" >&2
+    exit 1
+  fi
   if curl -sf http://localhost:4873/api/v1/status/ping/1.0.0 >/dev/null 2>&1; then
     echo "Proxy ready."
     break
@@ -49,6 +58,6 @@ if "$E2E_CMD" "$ROOT/scripts/e2e.mjs" --network "$NETWORK"; then
   echo "Follow DEMO.md for the live walkthrough. Open the printed Lora URL on stage."
   exit 0
 else
-  echo "DEMO: FAIL — see DEMO.md fallback (play the recorded video)."
+  echo "DEMO: FAIL"
   exit 1
 fi
