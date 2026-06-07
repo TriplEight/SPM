@@ -21,6 +21,14 @@ A new package version starts at UNREVIEWED and must be re-reviewed. When the pro
 sees a version it hasn't recorded, default it to UNREVIEWED. This is a demo beat:
 "the version bump is exactly where supply-chain attacks inject."
 
+## Lifecycle (how a row gets its status)
+1. Unknown version -> synthesize UNREVIEWED (free). Never store-then-block; just default.
+2. Auditor calls SplitRouter.attest(pkg, ver, status) on-chain (box = source of truth).
+3. Proxy mirrors that into this SQLite row: status=COMMUNITY_REVIEWED, auditor_addr,
+   attest_txid. SQLite is the hot-path read; the box is canonical. (Demo: seed both.)
+4. Install reads SQLite. >= COMMUNITY_REVIEWED -> 402. Else passthrough (free).
+5. Version bump -> no row -> UNREVIEWED again. (See docs/scope-map.md for the full flow.)
+
 ## Storage (SQLite — no Postgres/Redis)
 CREATE TABLE audit_status (
   pkg TEXT, version TEXT, status TEXT,

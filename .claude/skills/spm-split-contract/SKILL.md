@@ -18,13 +18,15 @@ If you later parametrize the amount, give treasury the integer remainder.
 ## ABI
 - setRecipients(auditor, maintainer, adversarial, treasury, ops, assetId): admin only.
   Store the 5 addresses + ASSET_ID in global state. (assetId param enables USDC or EURD.)
+  Also store `authorizedAuditor` (MVP: the auditor recipient address) for attest() gating.
 - pay(payment: gtxn.AssetTransferTxn, pkg: string, ver: string):
   assert payment.xferAsset == ASSET_ID
   assert payment.assetReceiver == Global.currentApplicationAddress
   assert payment.assetAmount == UNIT
   issue 5 inner AssetTransfer txns of 500/200/150/100/50 to the stored recipients
   log(concat(pkg, "@", ver, " ", payment.sender))   // proxy reads to confirm
-- attest(pkg: string, ver: string, status: uint64): assert sender is an allowed auditor;
+- attest(pkg: string, ver: string, status: uint64):
+  assert Txn.sender == authorizedAuditor   // MVP identity: registered Algorand address
   write box "attest:"+pkg+"@"+ver = pack(sender, Txn.txId, status, Global.latestTimestamp).
 
 ## Opt-ins (critical)
