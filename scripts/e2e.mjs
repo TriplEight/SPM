@@ -165,7 +165,8 @@ async function main() {
         }
       }
 
-      const loraUrl = `https://${netArg === 'testnet' ? 'testnet.' : ''}lora.algokit.io/transaction/${result.txid}`
+      const netSegment = netArg === 'testnet' ? 'testnet' : 'mainnet'
+      const loraUrl = `https://lora.algokit.io/${netSegment}/transaction/${result.txid}`
       console.log(`\n  Settlement: ${result.txid}`)
       console.log(`  Lora: ${loraUrl}`)
       return result.txid
