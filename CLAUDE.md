@@ -3,6 +3,8 @@
 @AGENTS.md
 @docs/architecture.md
 @docs/scope-map.md
+@docs/test-plan.md
+@docs/goals.md
 
 ## What we are building (12h hackathon MVP)
 An npm-compatible **registry overlay** where **human-audited** packages cost a
@@ -48,8 +50,18 @@ calls and pays for autonomously.
 - Every payment-path change must keep the free tier free (status < COMMUNITY_REVIEWED).
 - After finishing a unit of work, append a dated entry to `NOTES.md` (use /handoff).
 - Prefer the relevant SPM skill (spm-split-contract / spm-x402-flow /
-  spm-audit-status) and the Algorand DevRel skills before writing AVM/x402 code.
+  spm-audit-status / spm-testing) and the Algorand DevRel skills before writing code.
 - Pin dep versions on install; avoid API drift.
+
+## Verification (this is how "done" is judged — read before goal mode)
+- Single source of truth for "working": **`bash scripts/verify.sh` exits 0** and prints
+  every check `PASS`. It runs typecheck + unit + integration + a LocalNet E2E.
+- **`bash scripts/demo.sh` exits 0** runs the documented demo path end-to-end against the
+  configured network and prints the Lora URL. The demo is not "done" until this is green.
+- Test/loop on **LocalNet** (instant, deterministic). Reserve **TestNet** for the final
+  E2E pass + the live stage demo — never run goal loops against TestNet.
+- See docs/test-plan.md for the full matrix and docs/goals.md for ready-to-paste /goal
+  conditions. A goal condition must be something a command's transcript output proves.
 
 ## Dependency Security (non-negotiable)
 
@@ -92,4 +104,5 @@ pnpm config set minimumReleaseAge 1440     # 24-hour publish-delay gate
 - spm-split-contract — SplitRouter math + atomic inner-txn pattern.
 - spm-x402-flow      — 402 round-trip with @x402-avm + correct ids.
 - spm-audit-status   — status tiers, auto-reset rule, SQLite schema, /api contract.
+- spm-testing        — test stack, LocalNet fixtures, how to assert the 5-way split, harness.
 - (Algorand DevRel skills, copied into .claude/skills/ — AVM/x402/AlgoKit knowledge.)
