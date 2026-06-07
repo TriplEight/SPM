@@ -143,15 +143,17 @@ async function main() {
       if (!result.txid) throw new Error('no settlement txid returned')
 
       // Verify on-chain: 5 inner asset transfers 500/200/150/100/50
+      // algosdk v3 uses camelCase: innerTxns, and txn.txn.assetTransfer.amount (bigint)
       const info = await algod.pendingTransactionInformation(result.txid).do()
-      const innerTxns = info['inner-txns'] ?? []
+      const innerTxns = info.innerTxns ?? info['inner-txns'] ?? []
       if (innerTxns.length !== 5) {
         throw new Error(`expected 5 inner txns, got ${innerTxns.length}`)
       }
       const amounts = innerTxns.map(
         (t) =>
           Number(
-            t.txn?.txn?.aamt ??
+            t.txn?.txn?.assetTransfer?.amount ??
+              t.txn?.txn?.aamt ??
               t['asset-transfer-transaction']?.amount ??
               0,
           ),
