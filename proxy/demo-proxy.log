@@ -1,0 +1,2 @@
+$ node --import tsx/esm src/index.ts
+SPM proxy listening on http://localhost:4873
