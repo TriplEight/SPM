@@ -56,8 +56,10 @@ W10 README and hygiene, W11 harness scripts, W12 specification update.
 - **No AlgoKit CLI and no Docker.** The contract cannot be compiled with Puya
   and LocalNet cannot run. Contract tests execute in JavaScript under
   `algorand-typescript-testing`. CAUTION: `contracts/smart_contracts/artifacts/`
-  is now stale. A human must run `algokit project run build` to regenerate the
-  TEAL and the typed client.
+  is now stale. The committed ARC-56 specification still lists `pay()` and lacks
+  `distribute()`, so it does not describe the contract in this repository.
+  **Follow `docs/RUNBOOK-contract-build.md` on a machine with Docker and the
+  AlgoKit CLI.** It is a blocker for any MainNet deploy.
 - **The test harness does not move value.** Its inner-transaction emulation does
   not mutate ledger asset balances, so the remaining-dust assertions are
   arithmetic rather than a post-call balance read.
