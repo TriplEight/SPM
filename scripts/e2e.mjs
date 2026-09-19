@@ -5,8 +5,10 @@
 
 // Resolve algosdk from mcp/node_modules — the scripts/ directory has no node_modules.
 import { createRequire } from 'node:module'
+
 const require = createRequire(new URL('../mcp/package.json', import.meta.url))
 const algosdk = require('algosdk')
+
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,15 +23,15 @@ const netArg =
     : null) ??
   'localnet'
 
-const PROXY_URL = process.env['SPM_PROXY_URL'] ?? 'http://localhost:4873'
+const PROXY_URL = process.env.SPM_PROXY_URL ?? 'http://localhost:4873'
 const ALGOD_SERVER =
   netArg === 'testnet'
-    ? (process.env['ALGOD_SERVER'] ?? 'https://testnet-api.algonode.cloud')
+    ? (process.env.ALGOD_SERVER ?? 'https://testnet-api.algonode.cloud')
     : 'http://localhost'
-const ALGOD_PORT = netArg === 'testnet' ? (process.env['ALGOD_PORT'] ?? '443') : '4001'
+const ALGOD_PORT = netArg === 'testnet' ? (process.env.ALGOD_PORT ?? '443') : '4001'
 const ALGOD_TOKEN =
   netArg === 'testnet'
-    ? (process.env['ALGOD_TOKEN'] ?? '')
+    ? (process.env.ALGOD_TOKEN ?? '')
     : 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 
 const algod = new algosdk.Algodv2(ALGOD_TOKEN, ALGOD_SERVER, ALGOD_PORT)
@@ -52,8 +54,7 @@ async function check(name, fn) {
 }
 
 async function seedDb(pkg, version, status) {
-  const dbPath =
-    process.env['SQLITE_PATH'] ?? path.join(__dirname, '..', 'proxy', 'audit.db')
+  const dbPath = process.env.SQLITE_PATH ?? path.join(__dirname, '..', 'proxy', 'audit.db')
   if (!fs.existsSync(dbPath)) {
     throw new Error(`DB not found at ${dbPath} — is the proxy running?`)
   }
@@ -130,8 +131,8 @@ async function main() {
   })
 
   // ── 6. Paid install (full flow) — only if PAYER_MNEMONIC + SPLIT_APP_ID set ──
-  const payerMnemonic = process.env['PAYER_MNEMONIC']
-  const splitAppId = process.env['SPLIT_APP_ID']
+  const payerMnemonic = process.env.PAYER_MNEMONIC
+  const splitAppId = process.env.SPLIT_APP_ID
   if (payerMnemonic && splitAppId) {
     await check('paid install: 402→sign→pay→tarball', async () => {
       const { installTool } = await import('../mcp/src/tools/install.js')
@@ -149,14 +150,13 @@ async function main() {
       if (innerTxns.length !== 5) {
         throw new Error(`expected 5 inner txns, got ${innerTxns.length}`)
       }
-      const amounts = innerTxns.map(
-        (t) =>
-          Number(
-            t.txn?.txn?.assetTransfer?.amount ??
-              t.txn?.txn?.aamt ??
-              t['asset-transfer-transaction']?.amount ??
-              0,
-          ),
+      const amounts = innerTxns.map((t) =>
+        Number(
+          t.txn?.txn?.assetTransfer?.amount ??
+            t.txn?.txn?.aamt ??
+            t['asset-transfer-transaction']?.amount ??
+            0,
+        ),
       )
       const expected = [500, 200, 150, 100, 50]
       for (let i = 0; i < 5; i++) {
