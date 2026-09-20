@@ -18,9 +18,12 @@ disk before building on it.
 # 0.1 The artifacts describe THIS contract, not the old one.
 node -e "const j=require('./contracts/smart_contracts/artifacts/split_router/SplitRouter.arc56.json'); console.log(j.methods.map(m=>m.name).join(' '))"
 ```
-Expect exactly: `setRecipients optInToAsset distribute attest releaseAuthority setAttestationKey`.
+Expect exactly: `setPayTo setRecipients optInToAsset distribute attest releaseAuthority
+setAttestationKey`. Order may differ; the set must not.
 WARNING: if `pay` appears, the build did not run. Stop and run
 `docs/RUNBOOK-contract-build.md` first. Everything below assumes the new ABI.
+WARNING: if `setPayTo` is missing, the build predates the variant-B fix, and
+`releaseAuthority` cannot succeed. See 1.3.
 
 ```bash
 # 0.2 The app account is opted into MainNet USDC (31566704).
@@ -92,9 +95,21 @@ that greps the body will report a false negative.
 One address for the whole competition. Changing it after the first settled
 payment restarts the entry at zero.
 
-If the rekey variant is used rather than the app address, the ordering is
-irreversible: **opt into USDC first, then rekey.** A rekeyed account cannot
-sign its own opt-in, and the application cannot opt it in beforehand.
+Two variants ship. Decide before the first call, because `payTo` is write-once.
+
+- **Variant A, the default.** `payTo` is the application address. Call
+  `setRecipients` and skip `setPayTo`. `releaseAuthority` is unusable here, by
+  design: an application account cannot be rekeyed.
+- **Variant B, the rekey path.** `payTo` is a plain account rekeyed to the
+  application. Call `setPayTo(<address>)` **before** `setRecipients`.
+  `releaseAuthority` later rekeys that account away.
+
+WARNING: `setPayTo` fails once `payTo` has a value. There is no reset. A
+`setRecipients` call made first locks in variant A permanently.
+
+For variant B the ordering is irreversible: **opt into USDC first, then rekey.**
+A rekeyed account cannot sign its own opt-in, and the application cannot opt it
+in beforehand.
 
 ---
 
