@@ -107,6 +107,14 @@ async function main() {
     if (accept.network !== CAIP2_NETWORK) throw new Error(`bad network: ${accept.network}`)
     if (accept.asset !== USDC_ASA_ID) throw new Error(`bad asset: ${accept.asset}`)
     if (accept.amount !== '1000') throw new Error(`bad amount: ${accept.amount}`)
+    // G5: a bare equality check against PAY_TO proves nothing when the
+    // proxy is misconfigured — an empty (or malformed) PAY_TO would equal
+    // an equally empty advertised payTo. Assert the shape independently:
+    // 58-char base32 with a valid checksum (algosdk.isValidAddress), then
+    // assert it matches the configured value.
+    if (!algosdk.isValidAddress(accept.payTo)) {
+      throw new Error(`bad payTo: "${accept.payTo}" is not a valid Algorand address`)
+    }
     if (accept.payTo !== PAY_TO) throw new Error(`bad payTo: ${accept.payTo}`)
     if (accept.extra?.asset !== USDC_ASA_ID)
       throw new Error(`bad extra.asset: ${accept.extra?.asset}`)
