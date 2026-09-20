@@ -15,10 +15,7 @@
       "Grep",
       "Glob"
     ],
-    "deny": [
-      "Bash(rm -rf /*)",
-      "Bash(git push --force:*)"
-    ]
+    "deny": ["Bash(rm -rf /*)", "Bash(git push --force:*)"]
   },
   "enableAllProjectMcpServers": true,
   "env": {
