@@ -11,18 +11,36 @@ accepting a work item's self-report.
 | W0 | Research the installed x402 middleware | DONE | 0 | 110,049 |
 | W1 | Remove the EURD path from the MCP server and CLI | DONE | 0 | 49,932 |
 | W2 | SplitRouter: `distribute()`, drop `pay()`, bind integrity | DONE | 1 | 168,056 |
-| W3 | Proxy migration to the x402 middleware | IN PROGRESS | 1 blocked, 1 running | 43,099 + running |
+| W3 | Proxy migration to the x402 middleware | DONE | 1 blocked, 1 retry | 257,792 |
 | W4 | DSSE attestation signing | DONE | 0 | 69,003 |
+| W7 | `spm verify`, offline level-1 verification | DONE | 0 | 66,814 |
 | W8 | `spm-attest` CI action | DONE | 0 | 86,508 |
-| WH1 | Biome, invariant guard, git hooks, CI | DONE | 1 | 141,802 |
+| W9 | MCP payer on MainNet | DONE | 0 | 217,674 |
+| WH1 | Biome, invariant guard, git hooks, CI | DONE | 2 | 159,038 |
 
-Approximate subagent spend to date: 668,000 tokens across 7 items and 3 retry
-rounds. Orchestrator spend is not included.
+Approximate subagent spend: 1,185,000 tokens across 9 items and 4 retry rounds.
+Orchestrator spend is not included.
+
+Test totals: 45 proxy, 8 cli, 7 contracts, 5 mcp, 6 action. Typecheck passes.
+The invariant guard is clean.
 
 ## Not started
 
-W5 attestation routes, W6 claims ledger, W7 `spm verify`, W9 MCP on MainNet,
-W10 README and hygiene, W11 harness scripts, W12 specification update.
+W5 attestation routes, W6 claims ledger, W10 README and hygiene, W11 harness
+scripts, W12 specification update.
+
+## Open defects found but not yet fixed
+
+- **The boot guard runs lazily.** It fires on the first request rather than at
+  startup, because `proxy/src/index.ts` sat outside the work item's ownership.
+  Specification section B2 requires the server to refuse to boot when the
+  facilitator lacks MainNet `exact`. As built, a misconfigured facilitator fails
+  a paying caller instead of failing the deploy.
+- **Specification section B5 is wrong about the 402 body.** Payment requirements
+  arrive in the `PAYMENT-REQUIRED` header, not the JSON body, which is `{}`.
+  The check as written would read a false negative on qualification day.
+- **A dead suppression comment** sits at `proxy/src/x402/server.ts:56`. It names
+  a rule that is not enabled, so it suppresses nothing.
 
 ## Verified evidence
 
