@@ -31,16 +31,26 @@ scripts, W12 specification update.
 
 ## Open defects found but not yet fixed
 
-- **The boot guard runs lazily.** It fires on the first request rather than at
-  startup, because `proxy/src/index.ts` sat outside the work item's ownership.
-  Specification section B2 requires the server to refuse to boot when the
-  facilitator lacks MainNet `exact`. As built, a misconfigured facilitator fails
-  a paying caller instead of failing the deploy.
 - **Specification section B5 is wrong about the 402 body.** Payment requirements
   arrive in the `PAYMENT-REQUIRED` header, not the JSON body, which is `{}`.
   The check as written would read a false negative on qualification day.
-- **A dead suppression comment** sits at `proxy/src/x402/server.ts:56`. It names
-  a rule that is not enabled, so it suppresses nothing.
+- **Two facilitator checks disagree on `x402Version`.** `resolveFeePayer`
+  accepts a supported-kind that omits `x402Version`. The payment middleware's
+  route validation requires it. A facilitator response missing that field
+  therefore passes the boot guard and then fails route validation, with a
+  message saying the facilitator does not support `exact`. Both failures happen
+  before the port binds, so the behaviour is still correct, but the error text
+  would mislead whoever reads it. Found while verifying the boot guard.
+
+## Fixed after first report
+
+- **The boot guard now runs at startup** (W13). `proxy/src/index.ts` awaits
+  `boot()` before `serve()`, and the lazy default export is deleted rather than
+  left beside the new path. Verified by running the real process: a dead
+  facilitator exits 1 and never binds the port; a valid facilitator binds the
+  port and logs the resolved fee payer.
+- **The dead suppression comment is removed** (W13). It named a rule that is not
+  enabled, so it suppressed nothing.
 
 ## Verified evidence
 
