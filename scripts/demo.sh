@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# Runs the documented demo path end-to-end and prints the Lora URL. The G5 demo gate.
-# NETWORK defaults to testnet (the live stage network).
+# Runs the documented demo path end-to-end and prints the Lora URL(s). The
+# G5 demo gate. NETWORK defaults to testnet — the live rehearsal network
+# (CLAUDE.md: "TestNet is for pre-flight rehearsal only").
+#
+# WARNING: this script needs a real, funded PAYER_MNEMONIC and a real
+# deployed SplitRouter (SPLIT_APP_ID/SPLIT_APP_ADDRESS) in .env. It never
+# invents throwaway credentials the way scripts/verify.sh does for its
+# rehearsal run — a demo with a fake wallet proves nothing on stage.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-NETWORK="${NETWORK:-testnet}"
+export NETWORK="${NETWORK:-testnet}"
 echo "== SPM demo ($NETWORK) =="
 
-# Load root .env so SPLIT_APP_ID, PAYER_MNEMONIC, SPLIT_APP_ADDRESS etc. are in scope
+# Load root .env so SPLIT_APP_ID, PAYER_MNEMONIC, SPLIT_APP_ADDRESS,
+# ATTEST_SIGNING_KEY etc. are in scope.
 if [ -f "$ROOT/.env" ]; then
   set -o allexport
   # shellcheck source=/dev/null
@@ -14,48 +21,67 @@ if [ -f "$ROOT/.env" ]; then
   set +o allexport
 fi
 
-# Check required vars for paid-install path
-if [ -z "${SPLIT_APP_ID:-}" ] || [ -z "${PAYER_MNEMONIC:-}" ]; then
-  echo "ERROR: SPLIT_APP_ID and PAYER_MNEMONIC must be set in .env"
-  echo "       Run: bash scripts/deploy-testnet.sh first"
+# Required for every check below to run for real, not SKIP.
+missing=""
+for var in SPLIT_APP_ID SPLIT_APP_ADDRESS PAYER_MNEMONIC ATTEST_SIGNING_KEY; do
+  if [ -z "${!var:-}" ]; then
+    missing="$missing $var"
+  fi
+done
+if [ -n "$missing" ]; then
+  echo "ERROR: missing required .env value(s):$missing"
+  echo "       Run bash scripts/deploy-testnet.sh first, and set ATTEST_SIGNING_KEY."
   exit 1
 fi
+export SPLIT_APP_ID SPLIT_APP_ADDRESS PAYER_MNEMONIC ATTEST_SIGNING_KEY
 
-# Kill any stale proxy on port 4873 before starting ours
-fuser -k 4873/tcp 2>/dev/null || true
+# Kill any stale proxy on the configured port before starting ours.
+PORT="${PORT:-4873}"
+fuser -k "${PORT}/tcp" 2>/dev/null || true
 sleep 1
 
-# Start proxy in background with a demo-specific DB
-export SQLITE_PATH=/tmp/spm_demo_$(date +%s).db
+# Start proxy in background with a demo-specific DB.
+export SQLITE_PATH="/tmp/spm_demo_$(date +%s).db"
+export SPM_PROXY_URL="${SPM_PROXY_URL:-http://localhost:$PORT}"
 pnpm --dir "$ROOT/proxy" start >"$ROOT/proxy/demo-proxy.log" 2>&1 &
 PROXY_PID=$!
-trap 'kill "$PROXY_PID" 2>/dev/null; echo "Proxy stopped."' EXIT
+trap 'pkill -P "$PROXY_PID" 2>/dev/null; kill "$PROXY_PID" 2>/dev/null; fuser -k "${PORT}/tcp" 2>/dev/null; echo "Proxy stopped."' EXIT
 
-# Wait for proxy to be ready (up to 15s); fail if our process died
+# Wait for proxy to be ready (up to 15s); fail if our process died.
 echo "Starting proxy..."
-for i in $(seq 1 30); do
+ready=0
+for _ in $(seq 1 30); do
   if ! kill -0 "$PROXY_PID" 2>/dev/null; then
     echo "ERROR: proxy failed to start. Check proxy/demo-proxy.log"
     cat "$ROOT/proxy/demo-proxy.log" >&2
     exit 1
   fi
-  if curl -sf http://localhost:4873/api/v1/status/ping/1.0.0 >/dev/null 2>&1; then
+  if curl -sf "$SPM_PROXY_URL/api/v1/status/ping/1.0.0" >/dev/null 2>&1; then
+    ready=1
     echo "Proxy ready."
     break
   fi
   sleep 0.5
 done
-
-# tsx lives in mcp/node_modules so TS dynamic imports in e2e work
-TSX="$ROOT/mcp/node_modules/.bin/tsx"
-E2E_CMD="node"
-if [ -f "$TSX" ]; then
-  E2E_CMD="$TSX"
+if [ "$ready" -ne 1 ]; then
+  echo "ERROR: proxy did not become ready within 15s. Check proxy/demo-proxy.log"
+  cat "$ROOT/proxy/demo-proxy.log" >&2
+  exit 1
 fi
 
-if "$E2E_CMD" "$ROOT/scripts/e2e.mjs" --network "$NETWORK"; then
+# tsx lives in mcp/node_modules — several e2e.mjs checks import TypeScript
+# source files directly and need its loader. Required, not optional: a
+# plain `node` run cannot resolve those imports, so this script fails loud
+# instead of silently skipping real checks.
+TSX="$ROOT/mcp/node_modules/.bin/tsx"
+if [ ! -x "$TSX" ]; then
+  echo "ERROR: $TSX not found. Set up dependencies with pnpm first."
+  exit 1
+fi
+
+if "$TSX" "$ROOT/scripts/e2e.mjs"; then
   echo "DEMO: PASS"
-  echo "Follow DEMO.md for the live walkthrough. Open the printed Lora URL on stage."
+  echo "Follow DEMO.md for the live walkthrough. Open the printed Lora URL(s) on stage."
   exit 0
 else
   echo "DEMO: FAIL"
