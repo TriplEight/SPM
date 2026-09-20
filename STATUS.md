@@ -103,8 +103,10 @@ accepting a work item's self-report.
 | F1 | Claim hijack: bind proof owner to identity | DONE |
 | F2 | Action credential exposure: remove wallet-secret | DONE |
 | F3 | Reviewer identity, tarball ledger, path and rate-limit bypasses | DONE, 1 retry |
-| F4 | Contract: make `releaseAuthority` reachable | DONE, assertions not tightened |
+| F4 | Contract: make `releaseAuthority` reachable | DONE |
 | F5 | MCP settlement txid header | NOT STARTED |
+| F6 | Per-file SQLite isolation in the proxy tests | DONE |
+| F7 | Pin the payTo rejection assertions | DONE |
 | CI | Run the cli and action suites in CI | DONE |
 
 ### Defects the orchestrator found by its own probes
@@ -134,7 +136,7 @@ accepting a work item's self-report.
 | `scripts/guard.sh` | clean |
 | `pnpm exec biome ci .` | exit 0, zero warnings |
 
-### Open, blocked by a session rate limit
+### Open
 
 - **F5, the MCP settlement txid, is not started.** `mcp/src/tools/install.ts`
   reads `X-AUDIT-ATTESTATION`. Nothing sets that header. The only module that
@@ -144,21 +146,31 @@ accepting a work item's self-report.
   `decodePaymentResponseHeader` from `@x402-avm/core/http`; read
   `decoded.transaction` when `decoded.success` is true.
   `proxy/src/claims/middleware.ts` already consumes it that way.
-- **F4's new rejection assertions use a bare `.toThrow()`.** They pass on any
-  error, not only the intended assert. Each contract assert has a distinct
-  message: `admin only`, `payTo already set`,
-  `use the default app-address path instead`,
-  `payTo is the application address`. Pin each one.
 
-### New defect, found while verifying, not yet fixed
+### Defect found while verifying, now fixed
 
-- **The proxy test suite races itself on one SQLite file.**
-  `proxy/src/app.test.ts` and `proxy/src/status.test.ts` both run
-  `db.exec('DELETE FROM audit_status')` in `beforeEach`. Both open the same
-  `audit.db`, and vitest runs test files in parallel workers. One file's
-  truncation can land between another file's seed and its assertion. The suite
-  passes today, so the window is small, but it is flaky by construction. Give
-  each test file its own `SQLITE_PATH`, or run these files in one worker.
+- **The proxy test suite raced itself on one SQLite file.** `proxy/src/db.ts`
+  resolves its path once, at module load, and falls back to `proxy/audit.db`.
+  Nine test files opened that one file, in parallel vitest workers.
+  `app.test.ts` and `status.test.ts` each truncated `audit_status` in a
+  `beforeEach`, so one file's truncation could land between another file's seed
+  and its assertion. The suite passed because the window was small. It was
+  flaky by construction, and it destroyed a developer's local `audit.db` on
+  every run.
+
+  Every proxy test file now takes a unique temporary database, the pattern the
+  four `proxy/src/claims` files already used. `index.test.ts` was the file that
+  actually created the database: it spawns a subprocess, so it sets
+  `SQLITE_PATH` in the child's environment.
+
+  The rule is absolute rather than conditional: no proxy test opens
+  `proxy/audit.db`. Verified by deleting the file, running the suite, and
+  confirming it is not recreated. 199 tests, unchanged.
+
+- **Four contract rejection assertions were hollow.** The `setPayTo` and
+  `releaseAuthority` tests used a bare `.toThrow()`, which passes on any error.
+  Each now pins its own assert message. Verified by negative control: an
+  expected message the contract never emits fails the test.
 
 ### HTTP-level coverage gap
 
