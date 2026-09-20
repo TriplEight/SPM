@@ -5,6 +5,7 @@
 **Supersedes:** `SPEC.md` (12h hackathon spec) and v1/v2 of this document.
 **v2 (2026-09-19):** open questions resolved (§8), claims ledger added (§5), Bazaar config confirmed against GoPlausible docs (§4.3), attestation envelope decided (§6), pricing revised (§4.2), work sequence reordered to qualify early (§9), second grill pass folded in (§3.3–3.6).
 **v3 (2026-09-19, third grill pass):** `distribute()` fee-drain guard (§3.1); rekey ordering trap (§8); DSSE payload bounded to reviewed entries + free-path rate limit (§6.3); pricing turned into a measured gate (§4.2); third-party-payer recruitment promoted to P0 and started on day 1 (§9); claims ledger named as the cut line; Action fails open (§9 C3).
+**v4 (2026-09-20, implementation corrections):** fixed method name `getSupported()` (§4.3); the 402 body is `{}` — payment requirements arrive in the `PAYMENT-REQUIRED` header (§4.3, §9 B5); dynamic pricing confirmed present in `@x402-avm/core`, kept out of scope (§4.2, §8); §3.4 handler/settlement ordering resolved from middleware source; rounding unit (1,000 µUSDC) separated from `MIN_DISTRIBUTE` (100,000 µUSDC) (§3.1); A2 acceptance vectors corrected to hold at 1,000 rounding (§9 A2); `GET /v1/attest` free for an unreviewed version, matching §11 (§4.2); `integrity` column added to `audit_status` — a review with no stored integrity resolves to `UNREVIEWED` (§6); confirmed Bazaar `bazaar`-key shape (§4.3); noted a boot-guard/route-validation error-text mismatch as a remaining risk (§8); contract-test harness limitation documented, points to `docs/RUNBOOK-contract-build.md` (§9).
 
 Read this whole document before writing code. §3 lists blockers that invalidate parts of the existing architecture — do not start from `SPEC.md`'s design.
 
@@ -98,7 +99,10 @@ Reasons this is right regardless of the facilitator:
 
 **Contract changes (A2):**
 - Remove `pay()` from any MainNet-reachable path (LocalNet demo mode only, or delete).
-- Add `distribute()` — permissionless, no args. Divisible portion = `floor(balance / 1000) * 1000`; 5 inner axfers at 50/20/15/10/5; dust < 1000 µUSDC stays for the next call. With all prices multiples of 1000 µUSDC the split is exact (§4.2 invariant).
+- Add `distribute()` — permissionless, no args. Two separate constants apply; do not conflate them:
+  - **Rounding unit = 1,000 µUSDC.** Divisible portion = `floor(balance / 1000) * 1000`. 5 inner axfers at 50/20/15/10/5 of that portion. Dust stays for the next call and is always below 1,000 µUSDC.
+  - **`MIN_DISTRIBUTE` = 100,000 µUSDC ($0.10) is a separate gate, not the rounding unit.** It bounds how small a call can be, not how funds round.
+  With all prices multiples of 1,000 µUSDC the split is exact (§4.2 invariant).
 - **Guard `distribute()` against fee drain.** Inner-transaction fees are paid from the app account's ALGO balance unless the outer call covers them by fee pooling. Permissionless + app-paid fees = anyone can drain SPM's ALGO by calling `distribute()` in a loop on trivial balances. Two mitigations, apply **both**: (a) `assert(divisible >= MIN_DISTRIBUTE)` with `MIN_DISTRIBUTE = 100_000` µUSDC ($0.10) — roughly 200× the fee cost, so a call can never cost more than it moves; (b) set all inner fees to 0 and `assert(Global.currentApplicationCall.fee >= 6000)` so the *caller* pools the fees. Keep the app funded with ~1 ALGO regardless (min balance + headroom).
 - Amount-agnostic: delete `assert(payment.assetAmount === UNIT)`.
 - `attest()` must bind the tarball `dist.integrity` (sha512), not just `name@version`. **Verify current args; add if missing** — lockfiles can resolve the same `name@version` from other registries or tarball URLs.
@@ -127,11 +131,13 @@ httpServer.onProtectedRequest(async (ctx) => {
 
 Test both directions in A3: unreviewed tarball → 200 with no payment; reviewed tarball → 402.
 
-### 3.4 Handler/settlement ordering is unverified
+### 3.4 Handler/settlement ordering — resolved
 
-The x402 middleware verifies, runs the handler, then settles. Two things must be confirmed by reading `node_modules/@x402-avm/hono` (not guessed):
-1. **If settlement fails, is the handler's body discarded?** If not, a signed attestation leaks for free on every failed settle. If it leaks, buffer the response in a wrapper and only release it when `PAYMENT-RESPONSE` indicates success.
-2. **Is settlement skipped when the handler returns ≥400?** Callers must not pay for a malformed lockfile. If it is not skipped, validate the body in a pre-middleware that returns 400 before the payment middleware runs.
+Confirmed by reading `proxy/node_modules/@x402-avm/hono/dist/esm/index.mjs`:
+1. **A failed settlement discards the handler's body.** Lines 176–182 rebuild the response from the settlement error. A signed attestation cannot leak on a failed settle. No buffering wrapper is needed.
+2. **Settlement is skipped when the handler returns ≥400.** Lines 164–166 return before settlement is ever called.
+
+Keep the pre-middleware 400 validation anyway, as a deliberate choice: it means a caller never builds and signs a payment for a request that cannot succeed.
 
 ### 3.5 USDC must be explicit; fee payer must be advertised
 
@@ -155,7 +161,7 @@ GoPlausible's docs show `price: "$0.01"` with no `extra.asset` resolving to **AL
    │                                               │
    │ POST /v1/attest/lockfile        $0.02         │ ← volume driver
    │      (free if 0 reviewed pkgs — pre-mw)       │
-   │ GET  /v1/attest?name=&version=  $0.001        │ ← qualify with this first
+   │ GET  /v1/attest?name=&version=  $0.001        │ ← free unless reviewed
    │ GET  /<pkg>/-/<tarball>         $0.001        │ ← free unless reviewed
    │ GET  /api/v1/status/...         free          │
    │ GET  /api/v1/earnings/github/:login  free     │ ← claims ledger (read)
@@ -197,7 +203,8 @@ The tarball route stays — it is the differentiator and the narrative. Just don
 |---|---|---|
 | `POST /v1/attest/lockfile` (≥1 reviewed pkg) | **$0.02** | 20,000 |
 | `POST /v1/attest/lockfile` (0 reviewed pkgs) | **free** (signed, returned without 402) | 0 |
-| `GET /v1/attest?name=&version=` | $0.001 | 1,000 |
+| `GET /v1/attest?name=&version=` (unreviewed version) | **free** | 0 |
+| `GET /v1/attest?name=&version=` (reviewed version) | $0.001 | 1,000 |
 | Tarball, reviewed version | $0.001 | 1,000 |
 
 **Derivation:**
@@ -207,14 +214,16 @@ The tarball route stays — it is the differentiator and the narrative. Just don
 - **Buyer threshold.** A repo at ~30 CI runs/day spends ≈ $18/month at $0.02 — below one SCA seat and below typical no-approval card limits. At $0.05 it is ≈ $45/month.
 - **Leaderboard.** 10 repos × 20 PR-triggered runs/day × $0.02 = $4/day → top-10 on the 19 Sept snapshot. Caller count, not price, is the lever.
 - **Invariant:** every price is a multiple of 1,000 µUSDC so `distribute()` and the ledger split exactly.
+- **Single-attest route is priced the same way as the tarball route (§11):** free for an unreviewed version, $0.001 for a reviewed one. Both free paths are rate-limited (§6.3), so neither is an unpriced signing oracle.
 
-**Phase 2:** per-reviewed-package pricing (`$0.001 × reviewed`, capped). Requires dynamic pricing in `@x402-avm/core` — not documented; check the installed `.d.ts` for a function-typed `price` before assuming it exists.
+**Phase 2:** per-reviewed-package pricing (`$0.001 × reviewed`, capped). **Confirmed present, not a blocker:** the installed `@x402-avm/core` types define `price: Price | DynamicPrice`, where `type DynamicPrice = (context: HTTPRequestContext) => Price | Promise<Price>`. Per-reviewed-package pricing stays out of scope regardless (§10 lists dynamic pricing under "do not build").
 
 ### 4.3 Middleware + Bazaar (resolved — was open question 3)
 
-Confirmed against GoPlausible's troubleshooting guide (algorand.co, 2026-08-13) and `/supported`:
+Confirmed against GoPlausible's troubleshooting guide (algorand.co, 2026-08-13) and `getSupported()`:
 - Import `declareDiscoveryExtension` from **`@x402-avm/extensions`** (new dependency; pin to the same version as the other `@x402-avm/*` packages — confirm with `pnpm view @x402-avm/extensions versions`).
 - Attach per route as `extensions: declareDiscoveryExtension({...})`. **No `registerExtension` call needed** — the Hono binding detects the `bazaar` key and registers the server extension on the first paid request.
+- **Confirmed shapes:** `declareDiscoveryExtension` always returns its result under the key `bazaar`. Spread that into the route's `extensions`. `validateDiscoveryExtension` takes `declaration.bazaar`, not the wrapping record.
 - An empty `declareDiscoveryExtension({})` is valid. A malformed one fails **silently**: payments still settle, the catalog row never appears. Validate in a unit test: `validateDiscoveryExtension(decl.bazaar).valid === true`.
 - The catalog row is created **when a client pays**, from the payment payload. The facilitator does not crawl the host.
 - Merchant branding comes from `og:site_name`, `og:title`, `og:description`, `og:image` at the domain root. Trigger one more payment after changing them. No NFD step is required.
@@ -230,7 +239,8 @@ import { ALGORAND_MAINNET_CAIP2, USDC_MAINNET_ASA_ID } from '@x402-avm/avm'
 import { declareDiscoveryExtension } from '@x402-avm/extensions'
 
 const facilitator = new HTTPFacilitatorClient({ url: process.env.FACILITATOR_URL! })
-const kinds = (await facilitator.supported()).kinds
+const kinds = (await facilitator.getSupported()).kinds
+// CAUTION: the method is getSupported(), not supported().
 const FEE_PAYER = kinds.find(k => k.network === ALGORAND_MAINNET_CAIP2 && k.scheme === 'exact')
   ?.extra?.feePayer
 if (!FEE_PAYER) throw new Error('facilitator does not support algorand mainnet exact')
@@ -270,6 +280,8 @@ const routes = {
     }),
   },
   'GET /v1/attest': {
+    // accepts('$0.001') applies only to a reviewed version.
+    // Free tier for an unreviewed version via onProtectedRequest (§3.3, §4.2).
     accepts: accepts('$0.001'),
     description: 'Signed human-review attestation for one npm package version (query: name, version).',
     mimeType: 'application/json',
@@ -291,9 +303,21 @@ app.use(paymentMiddlewareFromHTTPServer(httpServer))
 
 Verify exact constructor/hook signatures against the installed 2.6.1 types; the shapes above follow GoPlausible's Hono examples.
 
+**The 402 JSON body is `{}`.** Payment requirements arrive base64-encoded in the
+**`PAYMENT-REQUIRED` response header**, not in the body. A decoded example:
+```json
+{"scheme":"exact","network":"algorand:wGHE2...","amount":"1000","asset":"31566704",
+ "payTo":"<PAY_TO>","maxTimeoutSeconds":60,
+ "extra":{"name":"USDC","decimals":6,"asset":"31566704","feePayer":"<feePayer>","tag":"x402-global-challenge"}}
+```
+Check `bazaar` and `tag` against the decoded header, never against the body.
+
 **Check commands (from GoPlausible):**
 ```bash
-curl -i https://<domain>/v1/attest?name=ms\&version=2.1.3 | grep -i bazaar
+# -i prints response headers, which is why this grep finds anything at all.
+curl -i https://<domain>/v1/attest?name=ms\&version=2.1.3 | grep -i "PAYMENT-REQUIRED"
+curl -sI https://<domain>/v1/attest?name=ms\&version=2.1.3 \
+  | awk -F': ' '/^payment-required/{print $2}' | base64 -d | jq .
 curl -s "https://facilitator.goplausible.xyz/discovery/resources?limit=1000" | jq '.items[] | select(.resourceUrl|contains("<domain>"))'
 for s in x402-global-challenge bazaar direct dev; do
   curl -s "https://facilitator.goplausible.xyz/data/leaderboards?cat=merchants&limit=200&range=all&env=mainnet&src=$s" \
@@ -443,6 +467,16 @@ The supply-chain standard (SLSA, Sigstore, npm provenance). DSSE signs exact pay
 - **L1 (offline, MVP):** `spm verify att.json --lockfile package-lock.json` — checks the ed25519 signature against keyid ∈ pinned or `.well-known` keys, and the sha256 of the local file against the subject.
 - **L2 (online, Phase 2):** fetch each `attestTxid` from the indexer and confirm it matches.
 
+### 6.4 Integrity binding (new — discovered while building)
+
+An attestation must bind to a specific tarball. `audit_status` carries an `integrity` column.
+
+**A review record with no stored integrity is not a complete review.** It resolves to `UNREVIEWED`.
+
+WARNING: without this rule the signed statement reports `integrityMatch: true` having
+compared nothing. That is a fabricated field in a paid security claim. §7 already
+forbids fabricated review records; this is the same failure.
+
 ---
 
 ## 7. Honesty constraints for seeded data (new)
@@ -466,14 +500,15 @@ A paid security attestation on MainNet that claims a human review that did not h
 | 3 | Bazaar `extensions` shape | **Resolved** (§4.3). |
 | 4 | Price | **Resolved** — $0.02 lockfile, free at zero coverage (§4.2). |
 | 5 | Signing | **Resolved** — DSSE + in-toto v1, dedicated ed25519 service key (§6). |
+| 6 | Handler/settle ordering | **Resolved** — confirmed by reading the middleware source (§3.4). |
+| 7 | Dynamic pricing support | **Resolved** — confirmed present in `@x402-avm/core`. Kept out of scope (§4.2, §10). |
 
 **Still open:**
 - **payTo = application address.** Nothing in GoPlausible's docs precludes it: the merchant is keyed by address, and an opted-in app account receives axfers. **Test on TestNet in A3** by pointing payTo at the TestNet SplitRouter app address and settling one payment through GoPlausible. **Fallback (preferred over a sweep):** payTo = plain account opted into USDC, then **rekeyed to the SplitRouter app address**. `distribute()` issues the inner axfers with `sender = payTo`, so funds still move directly and atomically with no custodial hop. After rekey, only the app can move funds — include an admin-gated `releaseAuthority(to)` and disclose it.
   **Order is not reversible: opt into USDC 31566704 *before* rekeying.** A rekeyed account cannot sign anything with its own key, including its own asset opt-in, and the app cannot opt it in before the rekey exists. Getting this backwards on MainNet strands the address and forces a new payTo — which, after the first settled payment, means starting the leaderboard entry over. Rehearse the full sequence (opt-in → rekey → inner-axfer from the rekeyed sender) end-to-end on TestNet in A3 before touching MainNet, and confirm there that an app can issue inner transactions on behalf of an account rekeyed to it.
-- **Handler/settle ordering** (§3.4) — confirm by reading the middleware source in A3.
-- **Dynamic pricing** support in `@x402-avm/core` — Phase 2 only.
 - **DEV classification heuristics** are not published. Mitigation: event-triggered CI only (no `schedule:`), one wallet per adopting team, no retries on 402 beyond the protocol's single retry.
 - **Tier naming** (§7).
+- **Facilitator boot-guard/route-validation mismatch (new — remaining risk).** Two facilitator checks disagree. `resolveFeePayer` accepts a supported-kind that omits `x402Version`. The payment middleware's route validation requires it. A response missing that field passes the boot guard, then fails route validation, and reports that the facilitator does not support `exact`. Both failures happen before the port binds, so behaviour is correct — but the error text misleads whoever reads it first.
 
 ---
 
@@ -494,10 +529,20 @@ Why this outranks everything below it: qualification needs one payment the team 
 *Check:* `grep -ri "eurd\|quantoz" proxy/src mcp/src` empty; `pnpm typecheck` passes.
 
 **A2. Rework `SplitRouter`.** Add `distribute()`; remove `pay()` from MainNet paths; amount-agnostic; bind `integrity` in `attest()` (§3.1). Optional: `setAttestationKey()`; `releaseAuthority()` only if the rekey fallback is chosen.
-*Check:* unit test — fund the app with 7,777 µUSDC → `distribute()` → pools/treasury/ops receive 3500/1400/1050/700/350 from the 7,000 divisible portion; 777 remains in the app. Second call with 223 added → 1,000 divisible → 500/200/150/100/50; 0 remains.
+*Check:* unit test, held at 1,000 rounding, not 100,000:
+- Fund the app with 777,700 µUSDC → `distribute()` emits 388500/155400/116550/77700/38850. 700 remains in the app.
+- Add 99,300 µUSDC (balance now 100,000) → `distribute()` emits 50000/20000/15000/10000/5000. 0 remains. This exercises the `MIN_DISTRIBUTE` boundary exactly.
+- A balance of 99,999 floors to 99,000, below `MIN_DISTRIBUTE` — the call fails.
+
+CAUTION: **contract-test harness limitation.** These tests run under
+`algorand-typescript-testing`, in JavaScript. They do not prove the contract compiles
+under Puya or runs on the AVM. The harness also does not mutate ledger balances from
+inner transactions, so the remaining-dust assertions above are arithmetic, not balance
+reads. A human runs `algokit project run build` to regenerate TEAL and the typed
+client. See `docs/RUNBOOK-contract-build.md`.
 
 **A3. Migrate the proxy to `paymentMiddlewareFromHTTPServer` + GoPlausible on TestNet.** Delete `settle.ts`. Add the `onProtectedRequest` free-tier grant (§3.3). **payTo = TestNet SplitRouter app address** (resolves the §8 open item). Read the middleware source for §3.4 and record findings in `NOTES.md`.
-*Check:* unreviewed tarball → 200 without payment; reviewed tarball → 402 with a facilitator-shaped body containing `bazaar`; paying via `@x402-avm/fetch` → 200; USDC arrives in the app account on TestNet; `scripts/verify.sh` green.
+*Check:* unreviewed tarball → 200 without payment; reviewed tarball → 402 with the decoded `PAYMENT-REQUIRED` header containing `bazaar` and `tag`; paying via `@x402-avm/fetch` → 200; USDC arrives in the app account on TestNet; `scripts/verify.sh` green.
 
 ### Phase B — MainNet qualification (D3–D5)
 
@@ -514,7 +559,7 @@ Why this outranks everything below it: qualification needs one payment the team 
 *Check:* the response verifies with `spm verify` offline; a tampered payload fails.
 
 **B5. Bazaar + tag** on the single-package route (§4.3). `validateDiscoveryExtension` unit test.
-*Check:* the 402 body contains `bazaar` and `tag`.
+*Check:* the 402 JSON body is `{}`. Decode the base64 `PAYMENT-REQUIRED` response header and confirm it contains `bazaar` and `tag`. Do not inspect the body — it never carries them.
 
 **B6. First real MainNet payment + `distribute()`.** One manual payment (not scripted, not from localhost) → resource appears in `/discovery/resources` → merchant appears under `src=x402-global-challenge` → call `distribute()`.
 *Check:* the settle txid, the Lora link to the 5-inner-transfer group, and the leaderboard source-loop output are in `NOTES.md`. **At this point the entry qualifies.**
