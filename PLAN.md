@@ -1,3 +1,6 @@
+> **Superseded.** This document describes the 12-hour hackathon MVP on TestNet.
+> The current design is `SPEC-v3.md`. See `README.md` for the MainNet overlay.
+
 # SPM — Sprint Overview & Implementation Plan
 
 Driven by Claude Code. Humans steer + review; the bottleneck is integration and

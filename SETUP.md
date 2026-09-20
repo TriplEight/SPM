@@ -1,3 +1,6 @@
+> **Superseded.** This document describes the 12-hour hackathon MVP on TestNet.
+> The current design is `SPEC-v3.md`. See `README.md` for the MainNet overlay.
+
 # SPM — Repo Setup (hackathon is live; do this fast)
 
 Goal: an empty repo → a working monorepo with Claude Code fully primed (Algorand skills + SPM-specific config) in ~20 min, before the build clock matters.

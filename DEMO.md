@@ -1,3 +1,6 @@
+> **Superseded.** This document describes the 12-hour hackathon MVP on TestNet.
+> The current design is `SPEC-v3.md`. See `README.md` for the MainNet overlay.
+
 # SPM demo runbook (documented + tested)
 
 The demo is "done" only when `NETWORK=testnet bash scripts/demo.sh` exits 0 and prints
