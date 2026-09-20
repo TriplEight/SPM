@@ -1,3 +1,7 @@
+> **This document is superseded by `SPEC-v3.md`, the authoritative spec.** This
+> document describes the 12h hackathon MVP and its TestNet design; the project has
+> since moved to MainNet.
+
 # SPM — Hackathon Engineering Spec (12h MVP)
 
 **Event constraints:** 2 devs · ~12h · all code via Claude Code · Algorand TestNet · language: TypeScript end-to-end.
