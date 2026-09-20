@@ -94,3 +94,18 @@ misleading text from every run.
 
 **Note.** The specification is now a tracked file, so a subagent can read the
 relevant section directly instead of having it pasted into its prompt.
+
+## 2026-09-20 — Close the CI test-gate gap
+
+**What.** Added `pnpm -C cli test` and
+`node --test .github/actions/spm-attest/attest.test.mjs` to
+`.github/workflows/ci.yml`. Rewrote the root `test` script in `package.json` to
+run the same five suites.
+
+**Why.** CI ran proxy, contracts and mcp only. The cli suite and the action
+suite were unreachable from any gate. The action suite asserts that no wallet
+credential reaches the network, so it is a security gate that nothing ran.
+
+**Expected effect.** A regression in the cli or the action now fails CI. A local
+`pnpm test` and a CI run now check the same set, so a passing local run no
+longer hides a CI failure.
