@@ -7,10 +7,21 @@
 # deployed SplitRouter (SPLIT_APP_ID/SPLIT_APP_ADDRESS) in .env. It never
 # invents throwaway credentials the way scripts/verify.sh does for its
 # rehearsal run — a demo with a fake wallet proves nothing on stage.
+#
+# NETWORK resolution order (read once, before the banner prints):
+#   1. An explicit NETWORK already set in the operator's shell environment
+#      wins. `NETWORK=testnet ./scripts/demo.sh` always gets TestNet, even
+#      if .env says mainnet — an explicit override is the least surprising
+#      rule and lets an operator force the safe network on the command line.
+#   2. Otherwise, NETWORK from .env is used.
+#   3. Otherwise, default to testnet.
+# The banner is printed only after this value is final, so it never
+# announces a network the script does not actually use.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export NETWORK="${NETWORK:-testnet}"
-echo "== SPM demo ($NETWORK) =="
+
+# Capture any operator-supplied NETWORK before .env can overwrite it.
+NETWORK_FROM_SHELL="${NETWORK:-}"
 
 # Load root .env so SPLIT_APP_ID, PAYER_MNEMONIC, SPLIT_APP_ADDRESS,
 # ATTEST_SIGNING_KEY etc. are in scope.
@@ -19,6 +30,28 @@ if [ -f "$ROOT/.env" ]; then
   # shellcheck source=/dev/null
   source "$ROOT/.env"
   set +o allexport
+fi
+
+# Resolve the final NETWORK value: explicit shell env wins over .env, which
+# wins over the testnet default. This is the one value used for the rest of
+# the script and the one printed in the banner below.
+if [ -n "$NETWORK_FROM_SHELL" ]; then
+  NETWORK="$NETWORK_FROM_SHELL"
+else
+  NETWORK="${NETWORK:-testnet}"
+fi
+export NETWORK
+echo "== SPM demo ($NETWORK) =="
+
+if [ "$NETWORK" = "mainnet" ]; then
+  echo "WARNING: NETWORK=mainnet. Step 8 makes a real USDC payment on Algorand MainNet."
+  if [ "${SPM_DEMO_CONFIRM_MAINNET:-}" != "yes" ]; then
+    read -r -p "Type 'yes' to confirm and spend real funds on MainNet: " confirm_mainnet
+    if [ "$confirm_mainnet" != "yes" ]; then
+      echo "Aborted: MainNet confirmation not given."
+      exit 1
+    fi
+  fi
 fi
 
 # Required for every check below to run for real, not SKIP.
