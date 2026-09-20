@@ -43,7 +43,7 @@ async function check(name, fn) {
   process.stdout.write(`  ${name}: `)
   try {
     const result = await fn()
-    console.log('PASS' + (result ? ` (${result})` : ''))
+    console.log(`PASS${result ? ` (${result})` : ''}`)
     passed++
     return true
   } catch (e) {

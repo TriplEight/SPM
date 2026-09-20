@@ -1,8 +1,8 @@
 # Implementation status — v3 specification
 
-Generated during the orchestration run of 2026-09-19. Every result below was
-verified by the orchestrator running the acceptance check itself, not by
-accepting a work item's self-report.
+Generated during the orchestration run of 2026-09-19 and 2026-09-20. Every
+result below was verified by the orchestrator running the acceptance check
+itself, not by accepting a work item's self-report.
 
 ## Per-item result
 
@@ -13,78 +13,92 @@ accepting a work item's self-report.
 | W2 | SplitRouter: `distribute()`, drop `pay()`, bind integrity | DONE | 1 | 168,056 |
 | W3 | Proxy migration to the x402 middleware | DONE | 1 blocked, 1 retry | 257,792 |
 | W4 | DSSE attestation signing | DONE | 0 | 69,003 |
+| W5 | Attestation routes, lockfile and single package | DONE | 1 (W5b) | 189,510 |
+| W5b | Integrity binding, free single-attest tier | DONE | 0 | 123,019 |
+| W6 | Claims ledger, accrual, reconciliation, payout script | DONE | 0 | 222,009 |
+| W6b | Mount the ledger middleware and routes | DONE | 0 | 120,096 |
 | W7 | `spm verify`, offline level-1 verification | DONE | 0 | 66,814 |
 | W8 | `spm-attest` CI action | DONE | 0 | 86,508 |
 | W9 | MCP payer on MainNet | DONE | 0 | 217,674 |
-| WH1 | Biome, invariant guard, git hooks, CI | DONE | 2 | 159,038 |
+| W13 | Boot guard at startup, dead suppression removed | DONE | 0 | 59,802 |
+| WH1 | Biome, invariant guard, git hooks, CI, gate alignment | DONE | 3 | 256,055 |
 
-Approximate subagent spend: 1,185,000 tokens across 9 items and 4 retry rounds.
+Approximate subagent spend: 2,000,000 tokens across 14 items and 6 retry rounds.
 Orchestrator spend is not included.
 
-Test totals: 45 proxy, 8 cli, 7 contracts, 5 mcp, 6 action. Typecheck passes.
-The invariant guard is clean.
+## Verified state
 
-## Not started
+| Check | Result |
+|---|---|
+| proxy tests | 142 |
+| cli tests | 8 |
+| contracts tests | 7 |
+| mcp tests | 5 |
+| Action tests | 6 |
+| `pnpm typecheck` | passes |
+| `scripts/guard.sh` | clean |
+| `pnpm exec biome ci .` | exit 0, one warning |
 
-W5 attestation routes, W6 claims ledger, W10 README and hygiene, W11 harness
-scripts, W12 specification update.
+## Defects found and fixed during verification
 
-## Open defects found but not yet fixed
+- **A fabricated field in a paid security attestation.** The lockfile analyser
+  treated "no known-good hash to compare" as "the hash matched", so every
+  reviewed package carried a signed `integrityMatch: true` without any
+  comparison. No integrity value was stored anywhere. Fixed in W5b: the store
+  now holds an integrity value, and a review record without one resolves to
+  `UNREVIEWED`. If SPM cannot say which tarball a human read, it must not sell
+  a claim about one.
+- **A subject digest bound to nothing.** The single-package statement set
+  `sha512: ''`, so a verifier had no artifact to check it against. It now
+  decodes from the stored integrity.
+- **The single-attest route charged for unreviewed packages**, contradicting
+  specification line 567 and invariant 4. The specification won.
+- **The boot guard ran on the first request, not at startup.** A misconfigured
+  facilitator produced a server that bound the port, looked healthy, and failed
+  a paying caller. Verified fixed by running the real process: a dead
+  facilitator exits 1 and never binds; a valid one binds and logs the fee payer.
+- **`distribute()` rounding granularity.** The acceptance numbers scaled the
+  specification's dust figure along with the amount, silently changing the
+  rounding unit from 1,000 to 100,000 microUSDC. The contract work item
+  reported the contradiction instead of implementing it.
+- **Two lint gates disagreed.** The pre-commit hook ran `biome check` on staged
+  files; CI ran the stricter `biome ci` on everything, and 17 files failed. A
+  gate that passes what the next gate rejects manufactures false confidence.
+  Both now run `biome ci .`.
+- **A frozen-lockfile install produced no native SQLite binding.** The build
+  allowlist sat in a file pnpm never reads. CI would have failed on its first
+  run.
+- **Guard rule scope.** Two invariant rules matched a keyword rather than the
+  invariant, firing 28 times on correct documentation and correct tests. An
+  auditable `guard-allow` marker now covers the single deliberate exception.
 
-- **Specification section B5 is wrong about the 402 body.** Payment requirements
-  arrive in the `PAYMENT-REQUIRED` header, not the JSON body, which is `{}`.
+## Open items, recorded rather than hidden
+
+- **Specification section B5 is wrong about the 402 body.** Payment
+  requirements arrive in the `PAYMENT-REQUIRED` header; the JSON body is `{}`.
   The check as written would read a false negative on qualification day.
 - **Two facilitator checks disagree on `x402Version`.** `resolveFeePayer`
-  accepts a supported-kind that omits `x402Version`. The payment middleware's
-  route validation requires it. A facilitator response missing that field
-  therefore passes the boot guard and then fails route validation, with a
-  message saying the facilitator does not support `exact`. Both failures happen
-  before the port binds, so the behaviour is still correct, but the error text
-  would mislead whoever reads it. Found while verifying the boot guard.
-
-## Fixed after first report
-
-- **The boot guard now runs at startup** (W13). `proxy/src/index.ts` awaits
-  `boot()` before `serve()`, and the lazy default export is deleted rather than
-  left beside the new path. Verified by running the real process: a dead
-  facilitator exits 1 and never binds the port; a valid facilitator binds the
-  port and logs the resolved fee payer.
-- **The dead suppression comment is removed** (W13). It named a rule that is not
-  enabled, so it suppressed nothing.
-
-## Verified evidence
-
-- Contract: 7 tests pass. `distribute()` floors to 1,000 microUSDC, asserts a
-  100,000 microUSDC minimum, asserts a 6,000 microALGO pooled fee, and emits
-  five zero-fee inner transfers summing exactly to the divisible portion.
-- Attestations: the pre-authentication encoding was re-derived independently by
-  the orchestrator and matches the DSSE specification byte for byte. Signatures
-  verify under raw ed25519. Tampered payloads and foreign keys are rejected. No
-  `MX` prefix is present.
-- CI action: exits 0 against a dead host and against a missing lockfile. Six
-  tests pass, including an assertion that exactly one retry follows a 402.
-- Dependencies: advisories against direct dependencies fell from 17 to 0.
-  43 transitive advisories remain, including one critical in `tar` beneath the
-  Puya compiler chain. It is build-time only and is not reachable at runtime.
-
-## Corrections the orchestrator made to its own instructions
-
-- **`distribute()` rounding granularity.** The acceptance numbers scaled the
-  specification's dust figure along with the amount. That silently changed the
-  rounding unit from 1,000 to 100,000 microUSDC and would have parked up to
-  $0.10 of undistributable dust. The contract work item reported the
-  contradiction instead of implementing it. Corrected.
-- **Guard rule scope.** Two invariant rules matched a keyword rather than the
-  invariant. They fired 28 times on correct documentation and correct tests.
-  Corrected, and an auditable `guard-allow` marker now covers the single
-  deliberate exception.
+  accepts a supported-kind that omits it; the middleware's route validation
+  requires it. Both failures happen before the port binds, so behaviour is
+  correct, but the error text would mislead.
+- **`scripts/e2e.mjs` counts passing checks but never prints the count.** This
+  is the one remaining Biome warning. It reads as an unfinished summary line
+  rather than dead code, so it was reported rather than renamed away. Printing
+  the count would change script output, which is a decision for a human.
+- **The reconciliation job has no production runner.** `proxy/src/claims/reconcile.ts`
+  is implemented and tested against an injectable indexer client, but nothing
+  schedules it.
+- **A Biome configuration quirk.** Adding an `overrides` block to
+  `biome.json` 2.5.14 breaks the top-level `files.includes` exclusion, so the
+  generated contract artifacts start being reformatted. Per-line
+  `biome-ignore` comments are used instead. Re-test before adding overrides.
 
 ## Known limitations of this environment
 
 - **No AlgoKit CLI and no Docker.** The contract cannot be compiled with Puya
   and LocalNet cannot run. Contract tests execute in JavaScript under
   `algorand-typescript-testing`. CAUTION: `contracts/smart_contracts/artifacts/`
-  is now stale. The committed ARC-56 specification still lists `pay()` and lacks
+  is stale. The committed ARC-56 specification still lists `pay()` and lacks
   `distribute()`, so it does not describe the contract in this repository.
   **Follow `docs/RUNBOOK-contract-build.md` on a machine with Docker and the
   AlgoKit CLI.** It is a blocker for any MainNet deploy.
@@ -93,9 +107,11 @@ scripts, W12 specification update.
   arithmetic rather than a post-call balance read.
 - **No MainNet credentials, no funded wallet, and no public domain.** Every
   on-chain and hosting item stays with a human.
-- **GitHub write access is refused for this organization.** Commits are local.
-  The push returns HTTP 403 until the Claude GitHub App is installed on the
-  repository, or GitHub is reconnected from claude.ai settings.
+
+## Not started
+
+W10 README rewrite, W11 verification harness update, W12 specification
+corrections.
 
 ## Items no subagent can close
 
