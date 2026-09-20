@@ -93,6 +93,80 @@ Orchestrator spend is not included.
   generated contract artifacts start being reformatted. Per-line
   `biome-ignore` comments are used instead. Re-test before adding overrides.
 
+## Review-fix round (2026-09-20)
+
+Every result below was verified by the orchestrator running the check, not by
+accepting a work item's self-report.
+
+| Item | Scope | Result |
+|---|---|---|
+| F1 | Claim hijack: bind proof owner to identity | DONE |
+| F2 | Action credential exposure: remove wallet-secret | DONE |
+| F3 | Reviewer identity, tarball ledger, path and rate-limit bypasses | DONE, 1 retry |
+| F4 | Contract: make `releaseAuthority` reachable | DONE, assertions not tightened |
+| F5 | MCP settlement txid header | NOT STARTED |
+| CI | Run the cli and action suites in CI | DONE |
+
+### Defects the orchestrator found by its own probes
+
+- **A claim hijack.** `verifyClaim` took the identity and the proof
+  independently. An attacker published a proof under an account they owned and
+  took over another identity's claim, and every future payout with it.
+- **A credential leak in the CI Action.** `attest.mjs` forwarded the caller's
+  wallet secret as a header to whatever host the `endpoint` input named.
+- **The first path-encoding fix broke invariant 4 the other way.**
+  `parseTarballPath` decoded `%40` and `%2f`. `isTarballPath` still tested the
+  raw path. A caller who also encoded the `/-/` separator skipped the free-tier
+  hook, and an unreviewed package returned 402. Caught by a negative control:
+  the original table asserted only the 402 direction. Both functions now share
+  `normalizeTarballPath`.
+
+### Verified state
+
+| Check | Result |
+|---|---|
+| proxy tests | 199 |
+| contracts tests | 13 |
+| mcp tests | 5 |
+| cli tests | 8 |
+| Action tests | 9 |
+| `pnpm typecheck` | passes |
+| `scripts/guard.sh` | clean |
+| `pnpm exec biome ci .` | exit 0, zero warnings |
+
+### Open, blocked by a session rate limit
+
+- **F5, the MCP settlement txid, is not started.** `mcp/src/tools/install.ts`
+  reads `X-AUDIT-ATTESTATION`. Nothing sets that header. The only module that
+  ever did was the deleted `proxy/src/settle.ts`. So `txid` is always null, and
+  every paid install reports `status: 'free'` with no proof of payment. The
+  correct source is the `PAYMENT-RESPONSE` header, decoded with
+  `decodePaymentResponseHeader` from `@x402-avm/core/http`; read
+  `decoded.transaction` when `decoded.success` is true.
+  `proxy/src/claims/middleware.ts` already consumes it that way.
+- **F4's new rejection assertions use a bare `.toThrow()`.** They pass on any
+  error, not only the intended assert. Each contract assert has a distinct
+  message: `admin only`, `payTo already set`,
+  `use the default app-address path instead`,
+  `payTo is the application address`. Pin each one.
+
+### New defect, found while verifying, not yet fixed
+
+- **The proxy test suite races itself on one SQLite file.**
+  `proxy/src/app.test.ts` and `proxy/src/status.test.ts` both run
+  `db.exec('DELETE FROM audit_status')` in `beforeEach`. Both open the same
+  `audit.db`, and vitest runs test files in parallel workers. One file's
+  truncation can land between another file's seed and its assertion. The suite
+  passes today, so the window is small, but it is flaky by construction. Give
+  each test file its own `SQLITE_PATH`, or run these files in one worker.
+
+### HTTP-level coverage gap
+
+The encoded-`/-/` case is asserted at hook level in
+`proxy/src/x402/tarball.test.ts`, for both the reviewed and the unreviewed
+direction. The two HTTP-level tables in `proxy/src/app.test.ts` stop at the
+encoded scope separator and omit that row. Add it to both tables.
+
 ## Known limitations of this environment
 
 - **No AlgoKit CLI and no Docker.** The contract cannot be compiled with Puya
