@@ -1,7 +1,7 @@
 # Handoff — the session with Docker, AlgoKit and MainNet
 
 Everything buildable without a chain, a domain or a human reviewer is done and
-pushed on `claude/spm-spec-orchestration-dlhhe2`. 35 commits.
+pushed on `spm-mainnet`.
 
 This document is the order of work. Do not reorder step 1.
 
@@ -30,7 +30,9 @@ the one below. `STATUS.md` records them.
 
 ## 1. Regenerate the contract artifacts. Nothing else first.
 
-**This is the only blocker that no previous session could clear.**
+**Done on 2026-09-21** with `puya-ts` 1.1.0 and `puya` 5.3.2. The command below
+now prints the seven methods, and the TEAL has the new `optInToAsset` branch.
+Continue with step 2. The text below is kept as the record of the check.
 
 `contracts/smart_contracts/artifacts/split_router/` still describes the old
 contract. Confirm it yourself:

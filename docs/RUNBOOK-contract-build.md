@@ -61,6 +61,11 @@ cd contracts
 algokit project run build
 ```
 
+Run it from `contracts/`. The repository root has no `.algokit.toml`, so there
+`algokit` reports `No such command 'build'`. The command calls `pnpm run build`,
+so `pnpm` must be on `PATH`, and `pnpm install` must have run first. Without the
+install, `puya-ts` cannot resolve `@algorandfoundation/algorand-typescript`.
+
 That runs two steps, both defined in `contracts/package.json`:
 1. `algokit compile ts smart_contracts --output-source-map --out-dir artifacts`
 2. `algokit generate client smart_contracts/artifacts --output {app_spec_dir}/{contract_name}Client.ts`
@@ -72,15 +77,15 @@ That runs two steps, both defined in `contracts/package.json`:
 node -e "const j=require('./smart_contracts/artifacts/split_router/SplitRouter.arc56.json'); console.log(j.methods.map(m=>m.name).join('\n'))"
 ```
 
-Expect exactly: `setRecipients`, `optInToAsset`, `distribute`, `attest`,
-`releaseAuthority`, `setAttestationKey`.
+Expect exactly: `setPayTo`, `setRecipients`, `optInToAsset`, `distribute`,
+`attest`, `releaseAuthority`, `setAttestationKey`.
 WARNING: if `pay` still appears, the build did not run. Do not continue.
 
 Then, from the repository root:
 
 ```bash
 pnpm typecheck          # deploy-config.ts must compile against the new client
-pnpm -C contracts test  # 7 tests must still pass
+pnpm -C contracts test  # 16 tests must still pass
 bash scripts/guard.sh   # must exit 0
 ```
 
@@ -90,18 +95,18 @@ These constructs are new and are the likely failure points. Each one is correct
 by the specification, so a failure means the implementation needs adjusting, not
 that the design is wrong.
 
-- **`asset.balance(payToAcct)` at `contract.algo.ts:88`.** The AVM can only read
+- **`asset.balance(payToAcct)` at `contract.algo.ts:131`.** The AVM can only read
   an asset holding when both the account and the asset are available to the
   call. If Puya or the AVM rejects it, the caller must pass the account and the
   asset as foreign references in the application call. Fix the deploy or call
   script, not the invariant.
-- **Inner transfers with `sender: payToAcct` at lines 104 to 133.** An
+- **Inner transfers with `sender: payToAcct` at lines 148 to 176.** An
   application can only spend from an account rekeyed to it. This succeeds when
   `payTo` is the application address, and when `payTo` is a plain account
   rekeyed to the application. It fails otherwise.
-- **`itxn.payment({ rekeyTo })` at line 172, inside `releaseAuthority`.** Verify
+- **`itxn.payment({ rekeyTo })` at line 215, inside `releaseAuthority`.** Verify
   the rekey actually clears the application's authority on LocalNet.
-- **`Txn.fee` at line 92.** Confirm the fee-pooling assertion behaves as
+- **`Txn.fee` at line 135.** Confirm the fee-pooling assertion behaves as
   expected. Submit `distribute()` with a pooled fee below 6,000 microALGO and
   confirm it rejects.
 - **Five inner transactions in one group.** Well within the AVM limit of 16.
