@@ -236,14 +236,14 @@ async function main() {
   // WARNING: never print PASS here for a step that did not run. Missing
   // credentials, an unfunded wallet, or a balance below MIN_DISTRIBUTE all
   // print SKIP with the exact reason — never a FAIL, never a silent PASS.
-  const payerMnemonic = process.env.PAYER_MNEMONIC
+  const payerMnemonic = process.env.SPM_DONOR_MNEMONIC
   const splitAppId = process.env.SPLIT_APP_ID
   const splitAppAddress = process.env.SPLIT_APP_ADDRESS
 
   if (!payerMnemonic || !splitAppId || !splitAppAddress) {
     skip(
       'on-chain: paid install + distribute()',
-      'PAYER_MNEMONIC / SPLIT_APP_ID / SPLIT_APP_ADDRESS not set — no funded wallet or ' +
+      'SPM_DONOR_MNEMONIC / SPLIT_APP_ID / SPLIT_APP_ADDRESS not set — no funded wallet or ' +
         'deployed contract in this environment',
     )
   } else {

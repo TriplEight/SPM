@@ -3,7 +3,7 @@
 # G5 demo gate. NETWORK defaults to testnet — the live rehearsal network
 # (CLAUDE.md: "TestNet is for pre-flight rehearsal only").
 #
-# WARNING: this script needs a real, funded PAYER_MNEMONIC and a real
+# WARNING: this script needs a real, funded SPM_DONOR_MNEMONIC and a real
 # deployed SplitRouter (SPLIT_APP_ID/SPLIT_APP_ADDRESS) in .env. It never
 # invents throwaway credentials the way scripts/verify.sh does for its
 # rehearsal run — a demo with a fake wallet proves nothing on stage.
@@ -23,7 +23,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Capture any operator-supplied NETWORK before .env can overwrite it.
 NETWORK_FROM_SHELL="${NETWORK:-}"
 
-# Load root .env so SPLIT_APP_ID, PAYER_MNEMONIC, SPLIT_APP_ADDRESS,
+# Load root .env so SPLIT_APP_ID, SPM_DONOR_MNEMONIC, SPLIT_APP_ADDRESS,
 # ATTEST_SIGNING_KEY etc. are in scope.
 if [ -f "$ROOT/.env" ]; then
   set -o allexport
@@ -56,7 +56,7 @@ fi
 
 # Required for every check below to run for real, not SKIP.
 missing=""
-for var in SPLIT_APP_ID SPLIT_APP_ADDRESS PAYER_MNEMONIC ATTEST_SIGNING_KEY; do
+for var in SPLIT_APP_ID SPLIT_APP_ADDRESS SPM_DONOR_MNEMONIC ATTEST_SIGNING_KEY; do
   if [ -z "${!var:-}" ]; then
     missing="$missing $var"
   fi
@@ -66,7 +66,7 @@ if [ -n "$missing" ]; then
   echo "       Run bash scripts/deploy-testnet.sh first, and set ATTEST_SIGNING_KEY."
   exit 1
 fi
-export SPLIT_APP_ID SPLIT_APP_ADDRESS PAYER_MNEMONIC ATTEST_SIGNING_KEY
+export SPLIT_APP_ID SPLIT_APP_ADDRESS SPM_DONOR_MNEMONIC ATTEST_SIGNING_KEY
 
 # Kill any stale proxy on the configured port before starting ours.
 PORT="${PORT:-4873}"
