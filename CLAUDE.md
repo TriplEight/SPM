@@ -91,6 +91,8 @@ Never weaken an assertion to make a check pass.
 
 - One work item per subagent. Give it the spec excerpt, the file list, and the acceptance checks.
 - Parallel subagents each get their own worktree (`.claude/worktrees/`, gitignored).
+  CAUTION: a new worktree starts from `master`, not from the current branch. Put
+  `git reset --hard <current HEAD sha>` as step 1 of every worktree subagent prompt.
 - A subagent report is at most 15 lines. Line 1 is DONE, BLOCKED or FAILED.
 - The orchestrator reruns every acceptance check before it accepts an item.
 - If the spec is ambiguous or conflicts with the code, stop and ask. Never guess.

@@ -41,6 +41,13 @@ Newest first.
   `.gitignore`, so an ignored worktree directory keeps `biome ci .` from linting it.
 - Expected effect: no accidental harness rollback, and a clean lint during parallel work.
 
+**Worktree base caution.**
+- What: `CLAUDE.md` tells the orchestrator to put `git reset --hard <HEAD sha>` first in
+  every worktree subagent prompt.
+- Why: `isolation: worktree` checked out `master`. Two subagents first saw hackathon-era
+  files and spent turns repairing their base.
+- Expected effect: subagents start on the correct commit.
+
 **Not changed (write-protected; needs a human).** `.claude/settings.json` sets
 `USDC_ASA_ID=10458941` and a TestNet `ALGOD_SERVER` in every session's environment. It
 also allows `npm:*` and `npx:*`, which conflicts with the pnpm-only rule.
