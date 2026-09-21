@@ -50,12 +50,12 @@ source changes again.
 3. **Check attribution before anyone donates.** SPM writes the
    `x402-global-challenge` tag at settlement, not retroactively.
    ```bash
-   curl -si "https://<domain>/v1/attest?name=ms&version=2.1.3" | grep -i "PAYMENT-REQUIRED"
+   node scripts/check-402.mjs "https://<domain>/v1/attest?name=ms&version=2.1.3"
    ```
-   Decode the header and check `extra.tag`, `extra.asset` = `31566704`, and
-   `extra.feePayer`. WARNING: the 402 body is `{}`. The requirements are in
-   the header only.
-   Check: the decoded header shows the three fields above.
+   WARNING: the 402 body is `{}`. The requirements are in the header only;
+   the script decodes it and checks `extra.tag`, `extra.asset`, `network`,
+   and `extra.feePayer` against the facilitator's live `getSupported()`.
+   Check: the script exits 0 and prints PASS for all four fields.
 
 4. **Seed real reviews.** A `COMMUNITY_REVIEWED` record with no stored
    `integrity` resolves to `UNREVIEWED` — enforced, not advisory. Target 15
