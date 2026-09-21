@@ -1,7 +1,7 @@
 # Runbook — MainNet launch and qualification
 
 **Audience:** the next session, starting after the contract artifacts are
-regenerated, MainNet is provisioned and deployed, and third-party payer
+regenerated, MainNet is provisioned and deployed, and third-party donor
 accounts exist.
 
 Everything buildable without a chain, a domain or a human reviewer is already
@@ -35,10 +35,10 @@ An empty result means the opt-in is missing, and every payment will fail.
 ```bash
 # 0.3 All five recipients are opted in. Repeat 0.2 for each address.
 # 0.4 setRecipients() ran, and the stored addresses are the intended ones.
-# 0.5 Each third-party payer is funded AND opted into 31566704.
+# 0.5 Each third-party donor is funded AND opted into 31566704.
 ```
-CAUTION: a payer who holds USDC but is not opted in cannot pay. A payer who is
-opted in but holds no ALGO cannot sign. Check both.
+CAUTION: a donor who holds USDC but is not opted in cannot donate. A donor
+who is opted in but holds no ALGO cannot sign. Check both.
 
 ---
 
@@ -104,8 +104,10 @@ Two variants ship. Decide before the first call, because `payTo` is write-once.
   application. Call `setPayTo(<address>)` **before** `setRecipients`.
   `releaseAuthority` later rekeys that account away.
 
-WARNING: `setPayTo` fails once `payTo` has a value. There is no reset. A
-`setRecipients` call made first locks in variant A permanently.
+`setPayTo` corrects `payTo` only while it holds zero USDC. Once revenue
+lands it asserts `payTo already holds revenue`, and the address stays fixed.
+WARNING: a `setRecipients` call made first, without a prior `setPayTo`,
+locks in variant A once a payment settles.
 
 For variant B the ordering is irreversible: **opt into USDC first, then rekey.**
 A rekeyed account cannot sign its own opt-in, and the application cannot opt it
@@ -193,12 +195,12 @@ protocol's single retry.
 
 ---
 
-## 5. Third-party payers
+## 5. Third-party donors
 
 This is the item the submission form asks about, and the only one whose
 latency is other people's.
 
-Each payer needs the `spm-attest` Action merged, a MainNet address, a USDC
+Each donor needs the `spm-attest` Action merged, a MainNet address, a USDC
 opt-in, and a few dollars of Algorand-native USDC. Acquiring that USDC is the
 bottleneck: most people hold none on Algorand, and an exchange withdrawal takes
 days.
@@ -215,13 +217,10 @@ time it does, and the volume goes with it.
 
 ## 6. Known open items
 
-- **Two facilitator checks disagree on `x402Version`.** `resolveFeePayer`
-  accepts a supported-kind that omits it; route validation requires it. Both
-  fail before the port binds, so behaviour is correct, but the error text says
-  the facilitator does not support `exact`, which misleads.
-- **The reconciliation job has no scheduler.** `proxy/src/claims/reconcile.ts`
-  is implemented and tested against an injectable indexer client, but nothing
-  runs it. Wire it before relying on unmatched-inflow ledgering.
+- **The reconciliation job has no scheduler.** `pnpm -C proxy reconcile`
+  (`proxy/src/claims/reconcile-main.ts`) runs the pass, but nothing calls it
+  on a schedule. Add a nightly cron or systemd timer before relying on
+  unmatched-inflow ledgering.
 - **Payouts are manual.** `scripts/payout.ts` is dry-run by default and takes a
   key-file argument. Check each claim by hand before paying.
 - **A verified claim cannot be re-opened through the API.** `POST /api/v1/claims`
@@ -261,5 +260,5 @@ time it does, and the volume goes with it.
 | `pnpm exec biome ci .` | exit 0, zero warnings |
 | `bash scripts/verify.sh` | exit 0, e2e SKIP pending network |
 
-`STATUS.md` holds per-item results and open defects. `SPEC.md` is the
-authoritative spec, corrected against what implementation measured.
+`SPEC.md` is the authoritative spec, corrected against what implementation
+measured.

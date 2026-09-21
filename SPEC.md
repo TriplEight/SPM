@@ -58,9 +58,9 @@ Verified by reading the repo, not by trusting the README.
 **Working:**
 - `contracts/` — `SplitRouter` in Algorand TypeScript (Puya-TS), AlgoKit. Methods: `setPayTo`, `setRecipients`, `optInToAsset`, `distribute`, `attest`, `releaseAuthority`, `setAttestationKey`. `setPayTo` corrects payTo only while it holds zero revenue. A non-zero USDC balance locks it. Unit tests hold the rounding and `MIN_DISTRIBUTE` boundaries via `algorand-typescript-testing`. The committed ARC-56 spec is stale — regenerate it with `algokit project run build` before deploying (`docs/HANDOFF-next-session.md`).
 - `proxy/` — Hono overlay on `paymentMiddlewareFromHTTPServer` and the `onProtectedRequest` free-tier grant. Routes: `POST /v1/attest/lockfile` and `GET /v1/attest` (`proxy/src/routes/attest.ts`), DSSE + in-toto signing (`proxy/src/attest/dsse.ts`), `GET /.well-known/spm-keys.json`. The claims ledger lives in `proxy/src/claims/`: `ledger.ts`, `middleware.ts`, `routes.ts`, `indexer.ts`, `reconcile.ts`, `reconcile-main.ts`, `github.ts`, `attribution-rules.ts`. The repo no longer has `settle.ts` or the EURD path.
-- `mcp/` — MCP server: `check_audit_status` (free), `install_audited_package` (x402-gated, MainNet/TestNet selectable, `wrapFetchWithPayment`). No donation opt-in yet (§4.4).
-- `cli/` — `spm status`, `spm install`, `spm verify` (offline L1). No `spm attest` command yet (§4.4).
-- `.github/actions/spm-attest/` — composite Action (`action.yml`, `attest.mjs`). It sends no wallet credential today. The owner decided the `donate` / `donor-mnemonic` opt-in in §9 C3. It is not built yet.
+- `mcp/` — MCP server: `check_audit_status` (free), `install_audited_package` (x402-gated, MainNet/TestNet selectable, `wrapFetchWithPayment`), `attest_lockfile` (donation opt-in, `mcp/src/donor.ts`, §4.4).
+- `cli/` — `spm status`, `spm install`, `spm verify` (offline L1), `spm attest <lockfile> [--donate] [--out <path>]` (§4.4).
+- `.github/actions/spm-attest/` — composite Action (`action.yml`, `attest.mjs`). It runs `spm attest` from its own checkout and sends no wallet credential unless `donate` is `'true'`. The `donate` / `donor-mnemonic` opt-in from §9 C3 is built.
 - `scripts/verify.sh`, `scripts/guard.sh`, `scripts/e2e.mjs`, `scripts/payout.ts`, `scripts/demo.sh` — `verify.sh` prints PASS, FAIL, or SKIP per check. A check with no funded wallet or facilitator reach degrades to SKIP. It never passes silently.
 - `.claude/` — 5 subagents, 2 commands, 10 Algorand DevRel skills, and 4 SPM-specific skills.
 
@@ -68,7 +68,7 @@ Verified by reading the repo, not by trusting the README.
 
 **Note on x402-avm ≥2.6:** the packages dropped `algosdk` in favour of `@algorandfoundation/algokit-utils@10.0.0-alpha.39`. Signer code written against algosdk types must use the 2.6 signer helpers (`toClientAvmSigner`). algosdk stays in the repo for contract/deploy scripts only.
 
-**Not yet built:** the MainNet deployment itself — no MainNet `SPLIT_APP_ID` exists, so `verify.sh` SKIPs the live checks. Contract artifacts under Puya (regenerate, do not hand-edit). The client donation opt-in: CLI `--donate`, MCP `allowDonation`, Action `donate` input (§4.4). GPG identity and ARC-19 stay out of scope (§10).
+**Not yet built:** the MainNet deployment itself — no MainNet `SPLIT_APP_ID` exists, so `verify.sh` SKIPs the live checks. GPG identity and ARC-19 stay out of scope (§10).
 
 ---
 
@@ -649,10 +649,10 @@ Use the `scope-sentinel` subagent before anything sizable.
 | `proxy/src/claims/reconcile-main.ts` | Nightly reconciliation entry point, `pnpm -C proxy reconcile` (§5.2) | Done |
 | `scripts/payout.ts` | Local, batched, dry-run by default | Done |
 | `cli/src/verify.ts` | `spm verify` (L1) | Done |
-| `cli/src/attest.ts` | `spm attest <lockfile> [--donate] [--out <path>]` (§4.4) | Not built |
-| `.github/actions/spm-attest/` | Composite Action (`action.yml`, `attest.mjs`) | Done — `donate` / `donor-mnemonic` inputs not built (§9 C3, §4.4) |
+| `cli/src/attest.ts` | `spm attest <lockfile> [--donate] [--out <path>]` (§4.4) | Done |
+| `.github/actions/spm-attest/` | Composite Action (`action.yml`, `attest.mjs`) | Done — `donate` / `donor-mnemonic` inputs built (§9 C3, §4.4) |
 | `mcp/src/tools/install.ts` | Remove EURD; MainNet; `wrapFetchWithPayment` | Done |
-| `mcp/src/donor.ts` | Reads `SPM_DONOR_MNEMONIC`, enforces the spend cap, backs `allowDonation` and the `attest_lockfile` tool (§4.4) | Not built |
+| `mcp/src/donor.ts` | Reads `SPM_DONOR_MNEMONIC`, enforces the spend cap, backs `allowDonation` and the `attest_lockfile` tool (§4.4) | Done |
 | `mcp/package.json` | Drop `@ever_amsterdam/x402-euro-eurd` | Done |
 | `proxy/package.json` | Add `@x402-avm/extensions`, `@noble/ed25519` (exact pins) | Done |
 | `.env.example` | MainNet block; `ATTEST_SIGNING_KEY`; `INDEXER_URL`; no pool/recipient mnemonics on the server | Done |
