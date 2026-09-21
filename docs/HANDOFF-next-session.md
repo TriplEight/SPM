@@ -63,6 +63,9 @@ source changes again.
    list against 20 real package-lock.json files and record the median
    reviewed count in `NOTES.md` (SPEC.md §4.2). If it lands below 5, fix the
    seed list, not the price.
+   ```bash
+   node scripts/hit-rate.mjs candidates.txt <lockfiles-dir>
+   ```
    Check: each seeded row has a stored `integrity` and resolves to
    `COMMUNITY_REVIEWED` through `/api/v1/status`.
 
