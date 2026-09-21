@@ -90,6 +90,10 @@ Decode that header and confirm `extra.tag`, `extra.asset` = `31566704`, and
 WARNING: the 402 **body is `{}`**. The requirements are in the header. A check
 that greps the body will report a false negative.
 
+`scripts/check-402.mjs <url>` decodes the header and prints one PASS/FAIL line
+per field: `extra.tag`, `extra.asset`, `network`, and `extra.feePayer` (the
+last resolved live from the facilitator's `getSupported()`, never hardcoded).
+
 ### 1.3 `payTo` is the leaderboard key
 
 One address for the whole competition. Changing it after the first settled
