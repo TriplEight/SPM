@@ -23,11 +23,13 @@ sees a version it hasn't recorded, default it to UNREVIEWED. This is a demo beat
 
 ## Lifecycle (how a row gets its status)
 1. Unknown version -> synthesize UNREVIEWED (free). Never store-then-block; just default.
-2. Auditor calls SplitRouter.attest(pkg, ver, status) on-chain (box = source of truth).
+2. A human reviews that exact tarball. The auditor calls
+   SplitRouter.attest(pkg, ver, status, integrity) on-chain (box = source of truth).
 3. Proxy mirrors that into this SQLite row: status=COMMUNITY_REVIEWED, auditor_addr,
-   attest_txid. SQLite is the hot-path read; the box is canonical. (Demo: seed both.)
+   attest_txid. SQLite is the hot-path read; the box is canonical.
+   WARNING: never write a review row without a human review (CLAUDE.md invariant 5).
 4. Install reads SQLite. >= COMMUNITY_REVIEWED -> 402. Else passthrough (free).
-5. Version bump -> no row -> UNREVIEWED again. (See docs/scope-map.md for the full flow.)
+5. Version bump -> no row -> UNREVIEWED again. SPEC.md §7 has the seeding rules.
 
 ## Storage (SQLite — no Postgres/Redis)
 CREATE TABLE audit_status (
