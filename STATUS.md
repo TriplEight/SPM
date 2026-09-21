@@ -179,6 +179,83 @@ The encoded-`/-/` case is asserted at hook level in
 direction. The two HTTP-level tables in `proxy/src/app.test.ts` stop at the
 encoded scope separator and omit that row. Add it to both tables.
 
+## Review rounds (2026-09-20 / 21)
+
+Three code reviews ran after implementation. Each found defects the test suite
+did not. Every fix below was verified by the orchestrator running its own
+probe, not by accepting a work item's report.
+
+### Round 1 — 10 findings, all fixed
+
+Claim hijack (proof owner not bound to identity). Wallet secret forwarded by
+the CI Action to an arbitrary host. Auditor share accrued to an unclaimable
+identity. Tarball revenue never ledgered. Rate limit bypassable via
+`X-Forwarded-For`. Lockfile integrity fabricated. CI ran only three of five
+suites. `releaseAuthority` unreachable. MCP read a header nothing set.
+
+### Round 2 — 7 findings, all fixed
+
+Duplicate-slash paywall bypass (a reviewed tarball served free, 318,961 bytes
+measured). `spm verify` printed PASS for a digest check it skipped.
+`demo.sh` announced TestNet then paid on MainNet. Anyone could reset a
+verified claim and block payouts. The 5 MB body cap bounded nothing.
+`x-real-ip` still bypassed the rate limit. Signed summary buckets did not sum.
+
+### Round 3 — 8 findings, 7 fixed, 1 deferred to a human
+
+A truncated integrity sold as a real sha512 digest. A genuine match reported
+as `INTEGRITY_MISMATCH` because SSRI multi-hash failed a byte-for-byte compare.
+`setPayTo` unrecoverable. `optInToAsset` opted in the wrong account, which
+would have failed every payment under variant B. Payout address unvalidated.
+Discovery example did not sum. Printed demo used HEAD, which is never gated.
+A flaky test fixture. The stale artifacts remain open; see below.
+
+### The defect class worth remembering
+
+The tarball path check broke four times: `%40`, then `%2F` and an encoded
+`/-/`, then duplicate and trailing slashes, then a case-sensitive `.tgz`
+against a case-insensitive route key. The first three were spelling problems,
+closed by adding rules to a hand-rolled decoder. Each left the next spelling
+open.
+
+The fourth was different: two predicates of different width decided the same
+question, and the free-tier hook's was narrower than the payment gate's.
+
+The fix is structural, not another rule. `normalizeTarballPath` replicates the
+installed matcher's own steps, and `isTarballRouteScope` mirrors the route key
+exactly. A path the gate protects but the hook cannot resolve is granted free,
+because an unresolvable path can never be a reviewed tarball.
+
+WARNING: any future change to the route key must change both, or the gap
+reopens.
+
+### Fake test fixtures hid two defects
+
+`sha512-abc` decodes to two bytes and was used as a reviewed package's
+integrity. A placeholder string was used as an Algorand address. Both passed
+until validation tightened, then three tests failed at once.
+
+A `MALFORMED_APP_ADDRESS` fixture flipped the last base32 character, which
+carries only padding bits, so it stayed valid on 14% of runs, measured over
+500 addresses. The suite was red on those runs.
+
+CAUTION: a fixture that does not look like real data stops testing the real
+path. Fixtures that must be invalid now assert their own invalidity at load.
+
+### Verified final state
+
+| Check | Result |
+|---|---|
+| proxy tests | 306 |
+| contracts tests | 16 |
+| mcp tests | 8 |
+| cli tests | 16 |
+| Action tests | 9 |
+| `pnpm typecheck` | passes |
+| `scripts/guard.sh` | clean |
+| `pnpm exec biome ci .` | exit 0, zero warnings |
+| `bash scripts/verify.sh` | `VERIFY: PASS`, e2e SKIP pending network |
+
 ## Known limitations of this environment
 
 - **No AlgoKit CLI and no Docker.** The contract cannot be compiled with Puya

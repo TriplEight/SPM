@@ -251,11 +251,11 @@ time it does, and the volume goes with it.
 
 | Check | Result |
 |---|---|
-| proxy tests | 147 |
-| cli tests | 8 |
-| contracts tests | 7 |
-| mcp tests | 5 |
-| Action tests | 6 |
+| proxy tests | 306 |
+| cli tests | 16 |
+| contracts tests | 16 |
+| mcp tests | 8 |
+| Action tests | 9 |
 | `pnpm typecheck` | passes |
 | `scripts/guard.sh` | clean |
 | `pnpm exec biome ci .` | exit 0, zero warnings |
