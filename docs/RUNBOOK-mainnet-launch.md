@@ -261,5 +261,5 @@ time it does, and the volume goes with it.
 | `pnpm exec biome ci .` | exit 0, zero warnings |
 | `bash scripts/verify.sh` | exit 0, e2e SKIP pending network |
 
-`STATUS.md` holds per-item results and open defects. `SPEC-v3.md` is the
+`STATUS.md` holds per-item results and open defects. `SPEC.md` is the
 authoritative spec, corrected against what implementation measured.
