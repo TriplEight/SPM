@@ -2,7 +2,8 @@
 
 SPM is an npm-compatible registry overlay for the Global x402 Challenge on Algorand MainNet.
 - Unreviewed packages pass through to npm for free.
-- Human-reviewed packages return HTTP 402. The caller pays USDC through the GoPlausible facilitator.
+- Human-reviewed packages return HTTP 402. A donor pays USDC through the GoPlausible facilitator.
+  Clients donate only on opt-in (`--donate`, `allowDonation`, `donate: 'true'`), key `SPM_DONOR_MNEMONIC`.
 - USDC accrues at one fixed `payTo`. `SplitRouter.distribute()` fans it out 50/20/15/10/5.
 - `POST /v1/attest/lockfile` is the volume route. It returns a signed attestation for a lockfile.
 
@@ -50,9 +51,9 @@ The attribution tag applies at settlement and is not retroactive.
 |---|---|---|
 | `contracts/` | `SplitRouter` (Puya-TS) | `algorand-contract-engineer` |
 | `proxy/` | Hono overlay, x402 routes, DSSE, SQLite status store, claims ledger | `x402-proxy-engineer` |
-| `mcp/`, `cli/` | MCP payer, `spm` CLI with offline `spm verify` | `mcp-payer-engineer` |
-| `.github/actions/spm-attest/` | CI Action. Fails open. Never reddens a user's CI. | — |
-| `scripts/` | `verify.sh`, `guard.sh`, `e2e.mjs`, `payout.ts`, `reconcile.ts` | `integration-tester` |
+| `mcp/`, `cli/` | MCP server and `spm` CLI: `install`, `attest` (opt-in `--donate`), offline `verify` | `mcp-payer-engineer` |
+| `.github/actions/spm-attest/` | CI Action; runs `spm attest`. Fails open. Never reddens a user's CI. | — |
+| `scripts/` | `verify.sh`, `guard.sh`, `e2e.mjs`, `payout.ts`. Reconcile: `pnpm -C proxy reconcile` | `integration-tester` |
 
 Skills: `spm-x402-flow`, `spm-audit-status`, `spm-split-contract`, `spm-testing`.
 Algorand reference skills: `algorand-core`, `algorand-typescript`, `algorand-x402-typescript`.

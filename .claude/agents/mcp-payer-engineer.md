@@ -1,15 +1,17 @@
 ---
 name: mcp-payer-engineer
 description: >
-  Use for the payer side: the MCP server (check_audit_status, install_audited_package)
-  and the spm CLI (install, verify). Owns mcp/ and cli/.
+  Use for the donor side: the MCP server (check_audit_status, install_audited_package,
+  attest_lockfile) and the spm CLI (install, attest, verify). Owns mcp/ and cli/.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: sonnet
 ---
 You own `mcp/` and `cli/`. Load the `spm-x402-flow` skill first.
 
 Rules:
-- Pay with `wrapFetchWithPayment` from `@x402-avm/fetch`. Never build a payment group by hand.
+- Donate only through `mcp/src/donor.ts`. It is off by default, and it enforces the 20,000
+  microUSDC cap and the USDC-only asset check. Never build a payment group by hand.
+- The key is `SPM_DONOR_MNEMONIC`. Never write "payer" in names or text.
 - Read the settlement txid from the `PAYMENT-RESPONSE` header with `decodePaymentResponseHeader`.
 - `spm verify` checks DSSE envelopes offline. It never calls the network.
 - Packages are `@x402-avm/*`, pinned to the same version. Never `@x402/*`.
