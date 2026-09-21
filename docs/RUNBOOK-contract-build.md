@@ -19,12 +19,23 @@ The ABI drift is total, not cosmetic:
 | Method | Committed artifacts | Current source |
 |---|---|---|
 | `setRecipients` | present | unchanged |
-| `optInToAsset` | present | unchanged |
+| `optInToAsset` | present | **changed** — opts in `payTo`, not the app address |
 | `attest` | `(string,string,uint64)` | `(string,string,uint64,string)` — gained `integrity` |
 | `pay` | `(axfer,string,string)` | **removed** |
+| `setPayTo` | absent | **added** |
 | `distribute` | absent | **added** |
 | `releaseAuthority` | absent | **added** |
 | `setAttestationKey` | absent | **added** |
+
+After the build, the ABI must list exactly these seven methods:
+
+```
+setPayTo setRecipients optInToAsset distribute attest releaseAuthority setAttestationKey
+```
+
+WARNING: `optInToAsset` changed behaviour without changing its signature, so
+the ABI alone will not reveal a stale build of it. Confirm the regenerated
+TEAL comes from the current source, not just that the method names match.
 
 WARNING: the unit tests run under `@algorandfoundation/algorand-typescript-testing`,
 which executes the contract as JavaScript. Passing tests do **not** prove the
