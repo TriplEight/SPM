@@ -76,7 +76,7 @@ sleep 1
 # Start proxy in background with a demo-specific DB.
 export SQLITE_PATH="/tmp/spm_demo_$(date +%s).db"
 export SPM_PROXY_URL="${SPM_PROXY_URL:-http://localhost:$PORT}"
-pnpm --dir "$ROOT/proxy" start >"$ROOT/proxy/demo-proxy.log" 2>&1 &
+pnpm --dir "$ROOT/proxy" start >"$ROOT/proxy/demo.log" 2>&1 &
 PROXY_PID=$!
 trap 'pkill -P "$PROXY_PID" 2>/dev/null; kill "$PROXY_PID" 2>/dev/null; fuser -k "${PORT}/tcp" 2>/dev/null; echo "Proxy stopped."' EXIT
 
@@ -85,8 +85,8 @@ echo "Starting proxy..."
 ready=0
 for _ in $(seq 1 30); do
   if ! kill -0 "$PROXY_PID" 2>/dev/null; then
-    echo "ERROR: proxy failed to start. Check proxy/demo-proxy.log"
-    cat "$ROOT/proxy/demo-proxy.log" >&2
+    echo "ERROR: proxy failed to start. Check proxy/demo.log"
+    cat "$ROOT/proxy/demo.log" >&2
     exit 1
   fi
   if curl -sf "$SPM_PROXY_URL/api/v1/status/ping/1.0.0" >/dev/null 2>&1; then
@@ -97,8 +97,8 @@ for _ in $(seq 1 30); do
   sleep 0.5
 done
 if [ "$ready" -ne 1 ]; then
-  echo "ERROR: proxy did not become ready within 15s. Check proxy/demo-proxy.log"
-  cat "$ROOT/proxy/demo-proxy.log" >&2
+  echo "ERROR: proxy did not become ready within 15s. Check proxy/demo.log"
+  cat "$ROOT/proxy/demo.log" >&2
   exit 1
 fi
 
@@ -114,7 +114,7 @@ fi
 
 if "$TSX" "$ROOT/scripts/e2e.mjs"; then
   echo "DEMO: PASS"
-  echo "Follow DEMO.md for the live walkthrough. Open the printed Lora URL(s) on stage."
+  echo "Open the printed Lora URL(s) on stage."
   exit 0
 else
   echo "DEMO: FAIL"
