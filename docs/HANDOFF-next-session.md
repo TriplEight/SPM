@@ -2,44 +2,49 @@
 
 ## 0. State
 
-Branch `spm-spec-closeout`, on top of `spm-mainnet` (`fd18e60`). Not pushed.
-The sandbox blocks SSH to github.com.
+Branch `spm-launch-tooling`, on top of `master` (`0be2758`, PR #18
+`spm-spec-closeout` merged). Not pushed. The sandbox blocks SSH to
+github.com.
 
-`bash scripts/verify.sh` prints `VERIFY: PASS` at `6ae80ad`, e2e SKIP. Run it
-with the Bash sandbox disabled.
+`bash scripts/verify.sh` prints `VERIFY: PASS` on this branch. e2e: 9 passed,
+1 SKIP (the on-chain step — no funded wallet or deployed contract yet). Run
+it with the Bash sandbox disabled.
 
 Built this session:
-- The reconciliation runner (`pnpm -C proxy reconcile`).
-- The boot guard's `x402Version` check.
-- Donation opt-in on every client (`spm attest`, MCP `allowDonation`, Action
-  `donate` input).
-- The composite Action now runs `spm attest` from its own checkout.
-- The old spec file renamed to `SPEC.md`. Stale hackathon docs deleted.
+- `b48d302` removes the TestNet pins (`USDC_ASA_ID`, `ALGOD_SERVER`) and the
+  `npm:*`/`npx:*` allows from `.claude/settings.json`. This commit closes
+  the old §3 human-only item about that file.
+- `scripts/check-402.mjs`, the step 3 attribution check. It exits 0 only if
+  tag, asset, network, and feePayer all PASS.
+- `scripts/hit-rate.mjs`, the SPEC.md §4.2 seed-list median measurement for
+  step 4.
+- `deploy/systemd/spm-reconcile.{service,timer}` for step 6. A human installs
+  them.
+- `scripts/verify.sh` now runs `unit:scripts`
+  (`node --test scripts/*.test.mjs`).
 
-`cd89fbb` regenerated the contract artifacts. `92a3831` fixed the build
-runbook to match. Skip `docs/RUNBOOK-contract-build.md` unless the contract
-source changes again.
+The user decided the `payTo` variant: Variant A. `payTo` is the SplitRouter
+application address. Call `setRecipients` only. Never call `setPayTo`. The
+app is not deployed yet.
+
+WARNING (worktree quirk): a worktree subagent cannot check out a commit that
+changes `.claude/settings.json` — the sandbox write-protects that file. Start
+worktree agents from `master`, not from this branch.
 
 ---
 
 ## 1. Ordered next steps
 
-0. **Push `spm-spec-closeout` and merge it.** It contains `spm-mainnet` plus this
-   session's work. Run `git push -u origin spm-spec-closeout` outside the sandbox.
-   Open a PR into `master`. Check: CI is green on the PR, and the PR merges.
-1. **Decide the `payTo` variant before any call.** `payTo` is the
-   competition leaderboard key.
-   - Variant A, the default: `payTo` is the application address. Call
-     `setRecipients` and never call `setPayTo`.
-   - Variant B, the rekey path: `payTo` is a plain account rekeyed to the
-     application. Call `setPayTo(<address>)` before `setRecipients`.
-     WARNING: opt into USDC first, then rekey. A rekeyed account cannot sign
-     its own opt-in.
-
-   `setPayTo` fixes `payTo` only while it holds zero USDC. It asserts
-   `payTo already holds revenue` once any arrives
-   (`contracts/smart_contracts/split_router/contract.algo.ts`, `setPayTo`).
-   Check: `NOTES.md` records the deployed app's chosen variant.
+0. **Push `spm-launch-tooling` and merge it.** Run
+   `git push -u origin spm-launch-tooling` outside the sandbox. Open a PR
+   into `master`. Check: CI is green on the PR, and the PR merges.
+1. **Deploy with Variant A.** The user decided the `payTo` variant: `payTo`
+   is the SplitRouter application address. Call `setRecipients` only.
+   WARNING: never call `setPayTo`. `setPayTo` fixes `payTo` only while it
+   holds zero USDC. It asserts `payTo already holds revenue` once any
+   arrives (`contracts/smart_contracts/split_router/contract.algo.ts`,
+   `setPayTo`).
+   Check: `NOTES.md` records the deployed app id and Variant A after deploy.
 
 2. **Deploy and configure.** `cp .env.example .env`, set `NETWORK=mainnet`.
    WARNING: delete the bootstrap recipient-mnemonic block from the server's
@@ -111,7 +116,3 @@ source changes again.
 - C2 human package reviews.
 - The §4.2 hit-rate measurement.
 - D5 and D6 submissions.
-- Delete `USDC_ASA_ID` and `ALGOD_SERVER` from `.claude/settings.json`. A
-  human must edit it. Agents cannot write that file. It currently pins
-  TestNet (`USDC_ASA_ID=10458941`) in every session and allows `npm:*` and
-  `npx:*`.
