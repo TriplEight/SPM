@@ -1,108 +1,110 @@
-# SPM — Project Memory (Claude Code)
+# SPM
 
-@AGENTS.md
-@docs/architecture.md
-@docs/scope-map.md
-@docs/test-plan.md
-@docs/goals.md
+SPM is an npm-compatible registry overlay for the Global x402 Challenge on Algorand MainNet.
+- Unreviewed packages pass through to npm for free.
+- Human-reviewed packages return HTTP 402. A donor pays USDC through the GoPlausible facilitator.
+  Clients donate only on opt-in (`--donate`, `allowDonation`, `donate: 'true'`), key `SPM_DONOR_MNEMONIC`.
+- USDC accrues at one fixed `payTo`. `SplitRouter.distribute()` fans it out 50/20/15/10/5.
+- `POST /v1/attest/lockfile` is the volume route. It returns a signed attestation for a lockfile.
 
-## What we are building (12h hackathon MVP)
-An npm-compatible **registry overlay** where **human-audited** packages cost a
-**~$0.001 USDC x402 micropayment per download on Algorand**, split on-chain
-50/20/15/10/5 among auditor/maintainer/adversarial-reviewer/treasury/ops via
-one **atomic group transaction**. Unreviewed packages are free.
-**Primary track: Agentic Commerce.** The hero path is an MCP server an AI agent
-calls and pays for autonomously.
+**Spec: `SPEC.md`.** Current state and next steps: `docs/HANDOFF-next-session.md`.
+Operator procedures: `docs/RUNBOOK-*.md`. Session log: `NOTES.md`.
+Generic Algorand and AlgoKit guidance: `AGENTS.md` (read only when you need it).
 
-## HARD CONSTRAINTS — do not violate
-- 2 devs, ~12h, Algorand **TestNet only**, **TypeScript everywhere**.
-- The demo MUST show: agent → 402 → autonomous USDC payment → 5 inner transfers
-  visible on Lora → tarball installs.
-- **Out of scope (do NOT build):** GPG keys, ARC-19 NFTs, Postgres/Redis (use
-  SQLite), reputation scoring, adversarial-review UX, governance/DAO, CodeQL
-  auto-scan, Dependabot/Renovate, multi-language, Stripe pre-funding.
-- Do NOT add tracks beyond Agentic Commerce (+ optional Quantoz EURD bonus).
-- When unsure whether something is in scope, ask the `scope-sentinel` subagent.
+## Invariants
 
-## Canonical facts (verified — use these literally)
-- x402 packages are scoped **`@x402-avm/*`** (core, avm, express, axios,
-  extensions). NOT `@x402/avm`.
-- Network ids are CAIP-2: import `ALGORAND_TESTNET_CAIP2` from `@x402-avm/avm`.
-- TestNet USDC ASA id = **10458941** (`USDC_TESTNET_ASA_ID`), 6 decimals.
-- x402 scheme = `"exact"`. Amounts are micro-units strings. $0.001 = "1000".
-- Split of 1000 µUSDC = 500/200/150/100/50 (auditor/maintainer/adversarial/treasury/ops).
-  CANONICAL split is **50/20/15/10/5**. The source doc also shows a stale **70/20/10**
-  three-way split — that is OBSOLETE; always use the five-way 50/20/15/10/5.
-- Contract = Algorand TypeScript (Puya-TS) via AlgoKit; LocalNet then TestNet.
-- Adoption mechanic ("no migration") = point npm at the proxy: `.npmrc` `registry=<proxy>`
-  or `npm install --registry <proxy>`. The proxy is the overlay; npm is unchanged.
-- A package gets PAID status only via an on-chain `attest()`; SQLite mirrors it. See the
-  audit lifecycle in docs/scope-map.md. For the demo we seed both (DB row + attest box).
+WARNING: every change preserves these. A violation costs money or a false security claim.
+
+1. `payTo` is the leaderboard key. It changes only while it holds no USDC.
+2. Never split per payment. Say "distributes atomically and permissionlessly".
+   Never say "in the same transaction".
+3. `extra = { asset, feePayer, tag: "x402-global-challenge" }` on every paid route.
+   `asset` is always explicit. An omitted asset can resolve to ALGO.
+4. Unreviewed never returns 402: tarball, single attest, and zero-coverage lockfile.
+5. A `COMMUNITY_REVIEWED` record means a human read that exact tarball.
+   Never create a review record in code, in a shipped fixture, or in a seed script.
+6. The facilitator is mandatory. No local facilitator. No direct chain submission.
+7. Money is integer micro-units. Never use floats.
+
+`bash scripts/guard.sh` enforces the invariants that grep can see.
+
+## Canonical facts
+
+| Fact | Value |
+|---|---|
+| Packages | `@x402-avm/{core,avm,hono,fetch,extensions}` at 2.6.1. Never `@x402/*`. |
+| MainNet CAIP-2 | `algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=` |
+| USDC ASA | MainNet 31566704. TestNet 10458941 (rehearsal only). 6 decimals. |
+| Facilitator | `https://facilitator.goplausible.xyz`. Client method `getSupported()`, not `supported()`. |
+| Prices (microUSDC) | lockfile 20,000; zero-coverage lockfile free; single attest 1,000; reviewed tarball 1,000 |
+| Split per 1,000 | 500 / 200 / 150 / 100 / 50 |
+| `distribute()` floor | `MIN_DISTRIBUTE` 100,000 microUSDC; outer fee at least 6,000 microALGO |
+| Attestations | DSSE + in-toto Statement v1, ed25519, unfunded service key. Never `algosdk.signBytes`. |
+| Single attest | `GET /v1/attest?name=@babel/core&version=7.25.2` (query params; scoped names contain `/`) |
+
+`feePayer` comes from `getSupported()` at boot. Never hardcode it.
+The attribution tag applies at settlement and is not retroactive.
 
 ## Repo map
-- `contracts/` AlgoKit TS — `SplitRouter` (pay/attest/setRecipients) + scripts.
-- `proxy/`     Hono overlay: npm passthrough, SQLite status store, x402 gate.
-- `mcp/`       MCP server: `check_audit_status`, `install_audited_package`.
-- `cli/`       `spm` wrapper (secondary human path).
 
-## Conventions
-- Money is always integer micro-units. Never use floats for amounts.
-- Every payment-path change must keep the free tier free (status < COMMUNITY_REVIEWED).
-- After finishing a unit of work, append a dated entry to `NOTES.md` (use /handoff).
-- Prefer the relevant SPM skill (spm-split-contract / spm-x402-flow /
-  spm-audit-status / spm-testing) and the Algorand DevRel skills before writing code.
-- Pin dep versions on install; avoid API drift.
+| Path | Content | Subagent |
+|---|---|---|
+| `contracts/` | `SplitRouter` (Puya-TS) | `algorand-contract-engineer` |
+| `proxy/` | Hono overlay, x402 routes, DSSE, SQLite status store, claims ledger | `x402-proxy-engineer` |
+| `mcp/`, `cli/` | MCP server and `spm` CLI: `install`, `attest` (opt-in `--donate`), offline `verify` | `mcp-payer-engineer` |
+| `.github/actions/spm-attest/` | CI Action; runs `spm attest`. Fails open. Never reddens a user's CI. | — |
+| `scripts/` | `verify.sh`, `guard.sh`, `e2e.mjs`, `payout.ts`. Reconcile: `pnpm -C proxy reconcile` | `integration-tester` |
 
-## Verification (this is how "done" is judged — read before goal mode)
-- Single source of truth for "working": **`bash scripts/verify.sh` exits 0** and prints
-  every check `PASS`. It runs typecheck + unit + integration + a LocalNet E2E.
-- **`bash scripts/demo.sh` exits 0** runs the documented demo path end-to-end against the
-  configured network and prints the Lora URL. The demo is not "done" until this is green.
-- Test/loop on **LocalNet** (instant, deterministic). Reserve **TestNet** for the final
-  E2E pass + the live stage demo — never run goal loops against TestNet.
-- See docs/test-plan.md for the full matrix and docs/goals.md for ready-to-paste /goal
-  conditions. A goal condition must be something a command's transcript output proves.
+Skills: `spm-x402-flow`, `spm-audit-status`, `spm-split-contract`, `spm-testing`.
+Algorand reference skills: `algorand-core`, `algorand-typescript`, `algorand-x402-typescript`.
+Scope questions go to `scope-sentinel`. The out-of-scope list is `SPEC.md` §10.
 
-## Dependency Security (non-negotiable)
-
-**Use pnpm everywhere.** Never use npm or yarn to install packages in this project.
+## Commands
 
 ```bash
-# Install
-pnpm install
-
-# Add a dep — always pin exact, never ^ or ~
-pnpm add --save-exact <package>@<version>
-pnpm add --save-exact --save-dev <package>@<version>
-
-# Audit before every install of a new dep
-pnpm audit --audit-level=moderate
-
-# One-time workspace config (run once per machine)
-pnpm config set save-exact true
-pnpm config set ignore-scripts true        # block postinstall scripts
-pnpm config set minimumReleaseAge 1440     # 24-hour publish-delay gate
+export PATH=$HOME/.local/share/pnpm/bin:$PATH   # pnpm is not on the default agent PATH
+pnpm typecheck
+pnpm -C proxy test      # also contracts, mcp, cli
+bash scripts/verify.sh  # all checks; prints VERIFY: PASS
+pnpm exec biome ci .    # zero warnings
 ```
 
-**Before adding any dependency:**
-1. Check it on [npmjs.com](https://npmjs.com): weekly downloads, last publish date, # of maintainers.
-2. Review its own `dependencies` and `peerDependencies` — each one is additional attack surface.
-3. Prefer packages already used in this repo over introducing new ones.
-4. Never add a dep that has postinstall scripts unless you can read and vouch for every line.
-5. Run `pnpm audit --audit-level=moderate` after adding; fix or justify any findings.
+CAUTION: run proxy tests and `verify.sh` with the Bash sandbox disabled.
+The sandbox blocks the unix sockets that the subprocess tests use.
 
-**Peer-dependency hygiene:**
-- Explicitly install peer deps required by x402-avm and algokit-utils at the pinned version used by the library, not a newer one. Mismatched peers cause subtle runtime bugs.
-- After `pnpm install`, check `pnpm why <package>` to see who pulls in a dep transitively.
+CAUTION: contract tests run in JavaScript. They do not prove Puya compilation.
+A human runs `algokit project run build` after a contract change.
 
-**Secrets:**
-- `.env` files are gitignored — never commit them.
-- Mnemonics and private keys live only in `.env`; never log or hard-code them.
-- `PAYER_MNEMONIC` in the MCP server is demo-only: a fresh TestNet account, zero real value.
+Never weaken an assertion to make a check pass.
 
-## Skills available
-- spm-split-contract — SplitRouter math + atomic inner-txn pattern.
-- spm-x402-flow      — 402 round-trip with @x402-avm + correct ids.
-- spm-audit-status   — status tiers, auto-reset rule, SQLite schema, /api contract.
-- spm-testing        — test stack, LocalNet fixtures, how to assert the 5-way split, harness.
-- (Algorand DevRel skills, copied into .claude/skills/ — AVM/x402/AlgoKit knowledge.)
+## Working rules
+
+- pnpm only. Pin exact: `pnpm add --save-exact <pkg>@<version>`. Justify each new dependency.
+- Run `pnpm audit --audit-level=moderate` after you add a dependency.
+- Secrets live in `.env` (gitignored). Pool mnemonics are cold and never touch the server.
+- Never log or hardcode a mnemonic or a private key.
+- No AI attribution in code, comments, docs, or commits.
+- After a unit of work, append a dated entry to `NOTES.md` (`/handoff`).
+- Redirect long output to `$TMPDIR/<name>.log`. Read the exit code and the last 30 lines.
+- Search before you read. Read line ranges, not whole files.
+
+## Orchestration
+
+- One work item per subagent. Give it the spec excerpt, the file list, and the acceptance checks.
+- Parallel subagents each get their own worktree (`.claude/worktrees/`, gitignored).
+  CAUTION: a new worktree starts from `master`, not from the current branch. Put
+  `git reset --hard <current HEAD sha>` as step 1 of every worktree subagent prompt.
+- A subagent report is at most 15 lines. Line 1 is DONE, BLOCKED or FAILED.
+- The orchestrator reruns every acceptance check before it accepts an item.
+- If the spec is ambiguous or conflicts with the code, stop and ask. Never guess.
+- Log harness changes in `.claude/HARNESS-CHANGELOG.md`: what, why, expected effect.
+
+<!-- rtk-instructions v2 -->
+## Command output
+
+`rtk` (`~/.local/bin/rtk`) condenses verbose output: `rtk git diff`, `rtk vitest`,
+`rtk tsc`, `rtk err <cmd>`, `rtk test <cmd>`, `rtk log <file>`.
+
+CAUTION: run the raw command when you verify an exact value: a checksum, a signature,
+a 402 header, or a test count. Never verify an acceptance check against filtered output.
+<!-- /rtk-instructions -->

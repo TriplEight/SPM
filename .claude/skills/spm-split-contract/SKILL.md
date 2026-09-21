@@ -1,40 +1,49 @@
 ---
 name: spm-split-contract
 description: >
-  How to build the SPM SplitRouter AVM contract — the atomic 5-way revenue
-  split. Use when writing or editing the contract, its inner transactions,
-  ABI methods, box attestation, or the deploy/opt-in script.
+  SplitRouter AVM contract: the permissionless distribute() fan-out of USDC that
+  accrues at payTo, box attestation, admin methods, and the contract-test limits.
+  Use when you read, edit, or test contracts/smart_contracts/split_router/.
 ---
 # SplitRouter
 
-ARC-4 app (Algorand TypeScript / Puya-TS). Receives a USDC AssetTransfer grouped
-immediately before the app call, then fans out via inner transactions.
+Source: `contracts/smart_contracts/split_router/contract.algo.ts` (Puya-TS, ARC-4).
+Build runbook: `docs/RUNBOOK-contract-build.md`.
 
-## Unit
-$0.001 USDC, 6 decimals => UNIT = 1000 µUSDC.
-Split: auditor 500, maintainer 200, adversarial 150, treasury 100, ops 50. Sum = 1000.
-If you later parametrize the amount, give treasury the integer remainder.
+## Money flow
 
-## ABI
-- setRecipients(auditor, maintainer, adversarial, treasury, ops, assetId): admin only.
-  Store the 5 addresses + ASSET_ID in global state. (assetId param enables USDC or EURD.)
-  Also store `authorizedAuditor` (MVP: the auditor recipient address) for attest() gating.
-- pay(payment: gtxn.AssetTransferTxn, pkg: string, ver: string):
-  assert payment.xferAsset == ASSET_ID
-  assert payment.assetReceiver == Global.currentApplicationAddress
-  assert payment.assetAmount == UNIT
-  issue 5 inner AssetTransfer txns of 500/200/150/100/50 to the stored recipients
-  log(concat(pkg, "@", ver, " ", payment.sender))   // proxy reads to confirm
-- attest(pkg: string, ver: string, status: uint64):
-  assert Txn.sender == authorizedAuditor   // MVP identity: registered Algorand address
-  write box "attest:"+pkg+"@"+ver = pack(sender, Txn.txId, status, Global.latestTimestamp).
+WARNING: never split per payment. The facilitator accepts only a plain USDC
+asset transfer to `payTo`. USDC accrues there. `distribute()` fans it out later.
+Say "distributes atomically and permissionlessly". Never say "in the same transaction".
 
-## Opt-ins (critical)
-The app account AND all 5 recipient accounts must opt into ASSET_ID before any pay().
-Do this in contracts/scripts/setup.ts, automated, before the demo. For EURD bonus,
-opt the same accounts into the EURD ASA too and call setRecipients with that assetId.
+- `distribute()` is permissionless. Anyone can call it.
+- It floors the balance to a multiple of `DIVISIBLE_UNIT` (1,000 microUSDC).
+- It asserts the divisible portion is at least `MIN_DISTRIBUTE` (100,000 microUSDC).
+- It asserts the outer fee is at least `MIN_DISTRIBUTE_FEE` (6,000 microALGO).
+- Split per 1,000 microUSDC: auditor 500, maintainer 200, adversarial 150,
+  treasury 100, ops 50. The sub-1,000 remainder stays in the account.
+
+## Methods
+
+| Method | Caller | Effect |
+|---|---|---|
+| `setPayTo(addr)` | creator | Sets payTo. Fails once payTo holds any USDC. |
+| `setRecipients(...)` | creator | Stores the 5 recipients and the asset id. |
+| `optInToAsset(asset)` | creator | Opts payTo into the asset. Without payTo set, opts the app account. |
+| `distribute()` | anyone | Fans out the divisible USDC balance held at payTo. |
+| `attest(pkg, ver, status, integrity)` | auditor | Writes the attestation box, binds integrity. |
+| `releaseAuthority(to)` | creator | Rekeys a separate payTo account away from the app. After it, `distribute()` cannot move those funds. |
+| `setAttestationKey(key)` | creator | Records the DSSE service public key. |
+
+Every recipient must be opted into USDC 31566704 before `distribute()` runs.
+`docs/HANDOFF-next-session.md` records the payTo variant decision.
 
 ## Tests
-- split-sum: inner amounts sum to UNIT.
-- reject wrong asset / wrong amount / wrong receiver.
-Build LocalNet first; only then TestNet. Print APP_ID + APP_ADDRESS.
+
+- Contract tests run under `@algorandfoundation/algorand-typescript-testing`, in JavaScript.
+- CAUTION: they do not prove the contract compiles under Puya.
+- CAUTION: inner transactions do not move ledger balances in that harness.
+  Remainder assertions are arithmetic, not balance reads.
+- After any contract change, a human runs `algokit project run build` and commits
+  the regenerated artifacts under `contracts/smart_contracts/artifacts/`.
+- Amounts are integer micro-units. Never use floats.

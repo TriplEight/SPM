@@ -1,139 +1,264 @@
 #!/usr/bin/env node
-// SPM end-to-end check — drives the real flow, asserts the on-chain 5-way split.
-// Usage: node scripts/e2e.mjs [--network localnet|testnet]
-// Exit 0 = E2E PASS; exit 1 = E2E FAIL.
 
-// Resolve algosdk from mcp/node_modules — the scripts/ directory has no node_modules.
-import { createRequire } from 'node:module'
-const require = createRequire(new URL('../mcp/package.json', import.meta.url))
-const algosdk = require('algosdk')
+// SPM end-to-end check — drives the real flow against a running proxy.
+// Usage: node scripts/e2e.mjs (tsx required — several checks import .ts
+// source files directly; see the imports below).
+//
+// Reads NETWORK, SPM_PROXY_URL, SQLITE_PATH, and ATTEST_SIGNING_KEY from the
+// environment — the same variables the proxy process reads (proxy/src/config.ts).
+// Set them once, in the same shell, before starting both the proxy and this
+// script (scripts/verify.sh and scripts/demo.sh both do this).
+//
+// Exit 0 = every check that ran passed. Exit 1 = at least one check failed.
+// A SKIPPED check never causes a non-zero exit — only a FAILED one does.
+
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
+import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
+// Anchors a CJS `require()` at each workspace package's own node_modules —
+// scripts/ has no node_modules of its own. Mirrors the pattern already
+// established for algosdk imports in this file.
+const requireFromProxy = createRequire(new URL('../proxy/package.json', import.meta.url))
 
-// Parse --network flag
-const netArg =
-  process.argv.find((a) => a.startsWith('--network='))?.split('=')[1] ??
-  (process.argv.includes('--network')
-    ? process.argv[process.argv.indexOf('--network') + 1]
-    : null) ??
-  'localnet'
+const PROXY_URL = process.env.SPM_PROXY_URL ?? 'http://localhost:4873'
 
-const PROXY_URL = process.env['SPM_PROXY_URL'] ?? 'http://localhost:4873'
-const ALGOD_SERVER =
-  netArg === 'testnet'
-    ? (process.env['ALGOD_SERVER'] ?? 'https://testnet-api.algonode.cloud')
-    : 'http://localhost'
-const ALGOD_PORT = netArg === 'testnet' ? (process.env['ALGOD_PORT'] ?? '443') : '4001'
-const ALGOD_TOKEN =
-  netArg === 'testnet'
-    ? (process.env['ALGOD_TOKEN'] ?? '')
-    : 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-
-const algod = new algosdk.Algodv2(ALGOD_TOKEN, ALGOD_SERVER, ALGOD_PORT)
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spm-e2e-'))
 
 let passed = 0
 let failed = 0
+let skipped = 0
 
 async function check(name, fn) {
   process.stdout.write(`  ${name}: `)
   try {
     const result = await fn()
-    console.log('PASS' + (result ? ` (${result})` : ''))
+    console.log(`PASS${result ? ` (${result})` : ''}`)
     passed++
     return true
   } catch (e) {
-    console.log(`FAIL — ${e.message}`)
+    console.log(`FAIL - ${e.message}`)
     failed++
     return false
   }
 }
 
-async function seedDb(pkg, version, status) {
-  const dbPath =
-    process.env['SQLITE_PATH'] ?? path.join(__dirname, '..', 'proxy', 'audit.db')
-  if (!fs.existsSync(dbPath)) {
-    throw new Error(`DB not found at ${dbPath} — is the proxy running?`)
-  }
-  const { execFileSync } = await import('node:child_process')
-  // Pass SQL via stdin to avoid shell expansion; sqlite3 reads from stdin when db
-  // path is the only argument. Each value is a separate quoted literal — all values
-  // here are internal E2E constants, but using stdin avoids any shell involvement.
-  const ts = Date.now()
-  const sql =
-    `INSERT OR REPLACE INTO audit_status ` +
-    `(pkg, version, status, auditor_addr, attest_txid, ts) ` +
-    `VALUES ('${pkg.replace(/'/g, "''")}','${version.replace(/'/g, "''")}',` +
-    `'${status.replace(/'/g, "''")}','E2E_AUDITOR','E2E_TXID',${ts});`
-  // execFileSync spawns sqlite3 directly — no shell, so no metachar expansion.
-  execFileSync('sqlite3', [dbPath], { input: sql })
+// WARNING: a SKIP must always carry a reason. A silent skip is as dishonest
+// as a false PASS — the reader must know exactly what did not run and why.
+function skip(name, reason) {
+  console.log(`  ${name}: SKIP - ${reason}`)
+  skipped++
 }
 
 async function main() {
-  console.log(`== SPM E2E (${netArg}) ==`)
+  // config.js resolves NETWORK/CAIP2/USDC-asset/payTo from the same
+  // environment the proxy process reads — imported directly, never
+  // re-derived, so this script can never drift from what the proxy is
+  // actually enforcing.
+  const { NETWORK, CAIP2_NETWORK, USDC_ASA_ID, PAY_TO, FACILITATOR_URL, resolveFeePayer } =
+    await import('../proxy/src/config.js')
+  const { setStatus } = await import('../proxy/src/status.js')
+  const { decodePaymentRequiredHeader } = requireFromProxy('@x402-avm/core/http')
+  const { HTTPFacilitatorClient } = requireFromProxy('@x402-avm/core/server')
+  const algosdk = requireFromProxy('algosdk')
 
-  // ── 1. Status API: unknown pkg → UNREVIEWED ──────────────────────────────
-  await check('status API: unknown → UNREVIEWED', async () => {
+  const netSegment = NETWORK === 'testnet' ? 'testnet' : 'mainnet'
+  const loraUrl = (txid) => `https://lora.algokit.io/${netSegment}/transaction/${txid}`
+
+  console.log(`== SPM E2E (network=${NETWORK}, proxy=${PROXY_URL}) ==`)
+
+  // ── 1. Free path: install an UNREVIEWED package — zero payment, no wallet ──
+  await check('free install (UNREVIEWED): 200, no payment, no wallet', async () => {
+    const res = await fetch(`${PROXY_URL}/chalk/-/chalk-5.3.0.tgz`)
+    if (res.status === 402) throw new Error('unreviewed tarball must never return 402')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    if (res.headers.get('PAYMENT-REQUIRED')) {
+      throw new Error('unreviewed tarball must carry no PAYMENT-REQUIRED header')
+    }
+  })
+
+  // ── 2. Paid gate: seed a COMMUNITY_REVIEWED tarball, expect 402 ──────────
+  const PAID_PKG = 'express'
+  const PAID_VER = '4.21.2'
+  // setStatus() writes through the real status store (better-sqlite3, the
+  // same SQLITE_PATH the proxy process has open) — no external `sqlite3`
+  // binary dependency, and no hand-written SQL to drift from the schema.
+  setStatus(PAID_PKG, PAID_VER, 'COMMUNITY_REVIEWED', 'E2E_AUDITOR', 'E2E_TXID')
+
+  await check(`paid gate: ${PAID_PKG}@${PAID_VER} tarball -> 402`, async () => {
+    const res = await fetch(`${PROXY_URL}/${PAID_PKG}/-/${PAID_PKG}-${PAID_VER}.tgz`)
+    if (res.status !== 402) throw new Error(`expected 402, got ${res.status}`)
+
+    // The 402 JSON body is always `{}` — requirements travel in the
+    // PAYMENT-REQUIRED header (base64), never in the body (SPEC.md §4.3).
+    const body = await res.json()
+    if (Object.keys(body).length !== 0) {
+      throw new Error(`402 body must be {}, got ${JSON.stringify(body)}`)
+    }
+
+    const headerB64 = res.headers.get('PAYMENT-REQUIRED')
+    if (!headerB64) throw new Error('missing PAYMENT-REQUIRED response header')
+    const decoded = decodePaymentRequiredHeader(headerB64)
+    const accept = decoded.accepts?.[0]
+    if (!accept) throw new Error('decoded header carries no accepts[0]')
+
+    if (accept.scheme !== 'exact') throw new Error(`bad scheme: ${accept.scheme}`)
+    if (accept.network !== CAIP2_NETWORK) throw new Error(`bad network: ${accept.network}`)
+    if (accept.asset !== USDC_ASA_ID) throw new Error(`bad asset: ${accept.asset}`)
+    if (accept.amount !== '1000') throw new Error(`bad amount: ${accept.amount}`)
+    // G5: a bare equality check against PAY_TO proves nothing when the
+    // proxy is misconfigured — an empty (or malformed) PAY_TO would equal
+    // an equally empty advertised payTo. Assert the shape independently:
+    // 58-char base32 with a valid checksum (algosdk.isValidAddress), then
+    // assert it matches the configured value.
+    if (!algosdk.isValidAddress(accept.payTo)) {
+      throw new Error(`bad payTo: "${accept.payTo}" is not a valid Algorand address`)
+    }
+    if (accept.payTo !== PAY_TO) throw new Error(`bad payTo: ${accept.payTo}`)
+    if (accept.extra?.asset !== USDC_ASA_ID)
+      throw new Error(`bad extra.asset: ${accept.extra?.asset}`)
+    if (accept.extra?.tag !== 'x402-global-challenge') {
+      throw new Error(`bad extra.tag: ${accept.extra?.tag}`)
+    }
+
+    // Independently resolve the expected fee payer straight from the
+    // facilitator, the same way proxy/src/x402/server.ts#boot() did — never
+    // hardcoded, never assumed.
+    const facilitator = new HTTPFacilitatorClient({ url: FACILITATOR_URL })
+    const supported = await facilitator.getSupported()
+    const expectedFeePayer = resolveFeePayer(supported, CAIP2_NETWORK)
+    if (accept.extra?.feePayer !== expectedFeePayer) {
+      throw new Error(`bad extra.feePayer: ${accept.extra?.feePayer}, want ${expectedFeePayer}`)
+    }
+  })
+
+  // ── 3. Zero-coverage lockfile: 200, free, signed attestation ─────────────
+  const lockfileBytes = Buffer.from(
+    JSON.stringify({
+      lockfileVersion: 3,
+      packages: { 'node_modules/left-pad': { version: '1.3.0' } },
+    }),
+  )
+  let attestation
+  await check('lockfile (zero-coverage): 200 free, signed attestation', async () => {
+    const res = await fetch(`${PROXY_URL}/v1/attest/lockfile`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: lockfileBytes,
+    })
+    if (res.status !== 200) throw new Error(`expected 200, got ${res.status}`)
+    if (res.headers.get('PAYMENT-REQUIRED')) {
+      throw new Error('a zero-coverage lockfile must never carry a PAYMENT-REQUIRED header')
+    }
+    const data = await res.json()
+    if (data.summary?.reviewed !== 0)
+      throw new Error(`expected 0 reviewed, got ${data.summary?.reviewed}`)
+    if (!data.attestation?.signatures?.length) throw new Error('no signature on the attestation')
+    attestation = data.attestation
+  })
+
+  // ── 4. Offline verification — reuse the CLI verifier, never reimplement ──
+  await check('attestation verifies offline (spm verify)', async () => {
+    if (!attestation) throw new Error('no attestation captured from check 3')
+    const seedHex = process.env.ATTEST_SIGNING_KEY
+    if (!seedHex) throw new Error('ATTEST_SIGNING_KEY not set in this process')
+    const seedBytes = Uint8Array.from(Buffer.from(seedHex, 'hex'))
+    const { loadSigningKey } = await import('../proxy/src/attest/keys.js')
+    const signingKey = await loadSigningKey(seedBytes)
+    const keyArg = `${signingKey.keyid}:${Buffer.from(signingKey.publicKey).toString('base64')}`
+
+    const envelopePath = path.join(tmpDir, 'lockfile-attestation.json')
+    fs.writeFileSync(envelopePath, JSON.stringify(attestation))
+    const lockfilePath = path.join(tmpDir, 'package-lock.json')
+    fs.writeFileSync(lockfilePath, lockfileBytes)
+
+    const { runVerify } = await import('../cli/src/verify.js')
+    const code = await runVerify([envelopePath, '--lockfile', lockfilePath, '--key', keyArg])
+    if (code !== 0) throw new Error('spm verify exited non-zero — see output above')
+  })
+
+  // ── 5. Status API: row shape, and unknown version -> UNREVIEWED ──────────
+  await check('status API: row shape for a reviewed package', async () => {
+    const res = await fetch(`${PROXY_URL}/api/v1/status/${PAID_PKG}/${PAID_VER}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    for (const key of [
+      'pkg',
+      'version',
+      'status',
+      'auditor_addr',
+      'attest_txid',
+      'ts',
+      'integrity',
+    ]) {
+      if (!(key in data)) throw new Error(`row missing key "${key}"`)
+    }
+    if (data.status !== 'COMMUNITY_REVIEWED') throw new Error(`got ${data.status}`)
+  })
+
+  await check('status API: unknown version -> UNREVIEWED', async () => {
     const res = await fetch(`${PROXY_URL}/api/v1/status/unknown-pkg-xyz-e2e/1.0.0`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     if (data.status !== 'UNREVIEWED') throw new Error(`got ${data.status}`)
   })
 
-  // ── 2. Free install: UNREVIEWED package — no 402 ─────────────────────────
-  await check('free install (UNREVIEWED): no 402', async () => {
-    // Use a scoped package path that we know is unreviewed
-    const res = await fetch(`${PROXY_URL}/api/v1/status/chalk/5.3.0`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    // Just verify the proxy responds correctly for a free package
-    if (data.status !== 'UNREVIEWED') throw new Error(`expected UNREVIEWED, got ${data.status}`)
-  })
-
-  // ── 3. Paid gate: COMMUNITY_REVIEWED package → 402 ───────────────────────
-  const PAID_PKG = 'express'
-  const PAID_VER = '4.21.2'
-
-  try {
-    await seedDb(PAID_PKG, PAID_VER, 'COMMUNITY_REVIEWED')
-  } catch (e) {
-    console.log(`  Note: Could not seed DB: ${e.message}`)
-  }
-
-  await check(`paid gate: ${PAID_PKG}@${PAID_VER} → 402`, async () => {
-    const res = await fetch(`${PROXY_URL}/${PAID_PKG}/-/${PAID_PKG}-${PAID_VER}.tgz`)
-    if (res.status !== 402) throw new Error(`expected 402, got ${res.status}`)
-    const body = await res.json()
-    if (!body.accepts?.[0]) throw new Error('no accepts in 402 body')
-    if (body.accepts[0].scheme !== 'exact') throw new Error(`bad scheme: ${body.accepts[0].scheme}`)
-    if (body.accepts[0].asset !== '10458941') throw new Error(`bad asset: ${body.accepts[0].asset}`)
-    if (body.accepts[0].maxAmountRequired !== '1000')
-      throw new Error(`bad amount: ${body.accepts[0].maxAmountRequired}`)
-  })
-
-  // ── 4. Auto-reset: different version → UNREVIEWED ────────────────────────
-  await check('auto-reset: different version → UNREVIEWED', async () => {
-    const res = await fetch(`${PROXY_URL}/api/v1/status/${PAID_PKG}/9.9.9`)
+  // ── 6. Auto-reset: version bump -> UNREVIEWED ─────────────────────────────
+  await check('auto-reset: version bump -> UNREVIEWED', async () => {
+    const res = await fetch(`${PROXY_URL}/api/v1/status/${PAID_PKG}/9.9.9-e2e-bump`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     if (data.status !== 'UNREVIEWED') throw new Error(`got ${data.status}`)
   })
 
-  // ── 5. Status API: seeded pkg → COMMUNITY_REVIEWED ───────────────────────
-  await check(`status API: ${PAID_PKG}@${PAID_VER} → COMMUNITY_REVIEWED`, async () => {
-    const res = await fetch(`${PROXY_URL}/api/v1/status/${PAID_PKG}/${PAID_VER}`)
+  // ── 7. Claims ledger: earnings + claim registration are free, reachable ──
+  await check('earnings route: free, reachable', async () => {
+    const res = await fetch(`${PROXY_URL}/api/v1/earnings/github/octocat`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    if (data.status !== 'COMMUNITY_REVIEWED') throw new Error(`got ${data.status}`)
+    if (res.headers.get('PAYMENT-REQUIRED')) throw new Error('earnings must never be gated')
   })
 
-  // ── 6. Paid install (full flow) — only if PAYER_MNEMONIC + SPLIT_APP_ID set ──
-  const payerMnemonic = process.env['PAYER_MNEMONIC']
-  const splitAppId = process.env['SPLIT_APP_ID']
-  if (payerMnemonic && splitAppId) {
-    await check('paid install: 402→sign→pay→tarball', async () => {
+  await check('claims route: free, reachable, returns a nonce', async () => {
+    const claimant = algosdk.generateAccount().addr.toString()
+    const res = await fetch(`${PROXY_URL}/api/v1/claims`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ identity: 'github:e2e-octocat', algorandAddress: claimant }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    if (res.headers.get('PAYMENT-REQUIRED')) throw new Error('claims must never be gated')
+    const data = await res.json()
+    if (!data.nonce) throw new Error('no nonce returned')
+  })
+
+  // ── 8. On-chain: paid install and the permissionless distribute() split ──
+  // WARNING: never print PASS here for a step that did not run. Missing
+  // credentials, an unfunded wallet, or a balance below MIN_DISTRIBUTE all
+  // print SKIP with the exact reason — never a FAIL, never a silent PASS.
+  const payerMnemonic = process.env.SPM_DONOR_MNEMONIC
+  const splitAppId = process.env.SPLIT_APP_ID
+  const splitAppAddress = process.env.SPLIT_APP_ADDRESS
+
+  if (!payerMnemonic || !splitAppId || !splitAppAddress) {
+    skip(
+      'on-chain: paid install + distribute()',
+      'SPM_DONOR_MNEMONIC / SPLIT_APP_ID / SPLIT_APP_ADDRESS not set — no funded wallet or ' +
+        'deployed contract in this environment',
+    )
+  } else {
+    const ALGOD_SERVER =
+      process.env.ALGOD_SERVER ??
+      (NETWORK === 'testnet'
+        ? 'https://testnet-api.algonode.cloud'
+        : 'https://mainnet-api.algonode.cloud')
+    const ALGOD_PORT = process.env.ALGOD_PORT ?? '443'
+    const ALGOD_TOKEN = process.env.ALGOD_TOKEN ?? ''
+    const algod = new algosdk.Algodv2(ALGOD_TOKEN, ALGOD_SERVER, ALGOD_PORT)
+
+    let paymentTxid
+    await check('on-chain: paid install -> plain USDC transfer, no inner txns', async () => {
+      // Reuses the real MCP install tool — never a hand-rolled payment flow.
       const { installTool } = await import('../mcp/src/tools/install.js')
       const result = await installTool.handler({ pkg: PAID_PKG, version: PAID_VER })
       if (!result.tarballPath || !fs.existsSync(result.tarballPath)) {
@@ -141,41 +266,125 @@ async function main() {
       }
       if (result.status !== 'paid') throw new Error(`expected paid, got ${result.status}`)
       if (!result.txid) throw new Error('no settlement txid returned')
+      paymentTxid = result.txid
 
-      // Verify on-chain: 5 inner asset transfers 500/200/150/100/50
-      // algosdk v3 uses camelCase: innerTxns, and txn.txn.assetTransfer.amount (bigint)
+      // The payment leg is a plain USDC transfer to payTo — distribute() is
+      // a separate, later, permissionless call. Asserting inner transfers
+      // on THIS transaction would test an architecture SPM no longer runs
+      // (SPEC.md §3.1).
       const info = await algod.pendingTransactionInformation(result.txid).do()
       const innerTxns = info.innerTxns ?? info['inner-txns'] ?? []
-      if (innerTxns.length !== 5) {
-        throw new Error(`expected 5 inner txns, got ${innerTxns.length}`)
+      if (innerTxns.length !== 0) {
+        throw new Error(`payment txn must carry no inner transactions, found ${innerTxns.length}`)
       }
-      const amounts = innerTxns.map(
-        (t) =>
-          Number(
-            t.txn?.txn?.assetTransfer?.amount ??
-              t.txn?.txn?.aamt ??
-              t['asset-transfer-transaction']?.amount ??
-              0,
-          ),
-      )
-      const expected = [500, 200, 150, 100, 50]
-      for (let i = 0; i < 5; i++) {
-        if (amounts[i] !== expected[i]) {
-          throw new Error(`inner txn ${i}: expected ${expected[i]}, got ${amounts[i]}`)
-        }
-      }
-
-      const netSegment = netArg === 'testnet' ? 'testnet' : 'mainnet'
-      const loraUrl = `https://lora.algokit.io/${netSegment}/transaction/${result.txid}`
-      console.log(`\n  Settlement: ${result.txid}`)
-      console.log(`  Lora: ${loraUrl}`)
+      console.log(`\n    Settlement: ${result.txid}`)
+      console.log(`    Lora: ${loraUrl(result.txid)}`)
       return result.txid
     })
-  } else {
-    console.log('  paid install:              SKIP (PAYER_MNEMONIC or SPLIT_APP_ID not set)')
+
+    // distribute() is permissionless but gated on-chain by MIN_DISTRIBUTE —
+    // it only runs once at least 100,000 microUSDC (the rounding-unit
+    // multiple) has accrued at payTo. Read the balance first: a real
+    // shortfall, or an unreachable node, is a SKIP, never a FAIL.
+    const DISTRIBUTE_CHECK_NAME = 'on-chain: distribute() -> 5 inner axfers, 50/20/15/10/5'
+    const DIVISIBLE_UNIT = 1000
+    const MIN_DISTRIBUTE = 100_000
+    const SHARE_PCT = { auditor: 50, maintainer: 20, adversarial: 15, treasury: 10 } // ops = remainder
+
+    let divisible = null
+    try {
+      const info = await algod.accountInformation(splitAppAddress).do()
+      const holding = (info.assets ?? []).find((a) => String(a.assetId) === String(USDC_ASA_ID))
+      const balance = holding ? Number(holding.amount) : 0
+      divisible = Math.floor(balance / DIVISIBLE_UNIT) * DIVISIBLE_UNIT
+    } catch (e) {
+      skip(DISTRIBUTE_CHECK_NAME, `could not read payTo's USDC balance: ${e.message}`)
+    }
+
+    if (divisible !== null && divisible < MIN_DISTRIBUTE) {
+      skip(
+        DISTRIBUTE_CHECK_NAME,
+        `accrued balance rounds to ${divisible} microUSDC, below MIN_DISTRIBUTE (${MIN_DISTRIBUTE})`,
+      )
+    } else if (divisible !== null) {
+      await check(DISTRIBUTE_CHECK_NAME, async () => {
+        // contracts/ owns its own dependency set (algokit-utils, the
+        // generated typed client) — anchor `require` there, same pattern as
+        // requireFromProxy above.
+        const contractsRequire = createRequire(
+          new URL('../contracts/package.json', import.meta.url),
+        )
+        const { AlgorandClient, microAlgos } = contractsRequire('@algorandfoundation/algokit-utils')
+        const contractsAlgosdk = contractsRequire('algosdk')
+        const { SplitRouterFactory } = await import(
+          '../contracts/smart_contracts/artifacts/split_router/SplitRouterClient.js'
+        )
+
+        const account = contractsAlgosdk.mnemonicToSecretKey(payerMnemonic)
+        const algorand = AlgorandClient.fromConfig({
+          algodConfig: { server: ALGOD_SERVER, port: Number(ALGOD_PORT), token: ALGOD_TOKEN },
+        })
+        algorand.setSigner(
+          account.addr,
+          contractsAlgosdk.makeBasicAccountTransactionSigner(account),
+        )
+
+        const factory = algorand.client.getTypedAppFactory(SplitRouterFactory, {
+          defaultSender: account.addr,
+        })
+        const { appClient } = await factory.getAppClientById({ appId: BigInt(splitAppId) })
+
+        // WARNING: the committed ARC-56 artifacts are regenerated by a human
+        // with Docker and the AlgoKit CLI (docs/RUNBOOK-contract-build.md).
+        // A stale client has no `distribute`, so calling it throws a
+        // TypeError that reads like a bug in this script. Say what is
+        // actually wrong instead.
+        if (typeof appClient.send?.distribute !== 'function') {
+          throw new Error(
+            'SplitRouter client has no distribute(): the committed ARC-56 artifacts are stale. ' +
+              'Run docs/RUNBOOK-contract-build.md on a machine with Docker and the AlgoKit CLI, ' +
+              'then re-run this check.',
+          )
+        }
+
+        const sendResult = await appClient.send.distribute({
+          args: {},
+          assetReferences: [BigInt(USDC_ASA_ID)],
+          staticFee: microAlgos(6000),
+        })
+        const distributeTxid = sendResult.transaction.txID()
+
+        const info = await algod.pendingTransactionInformation(distributeTxid).do()
+        const innerTxns = info.innerTxns ?? info['inner-txns'] ?? []
+        if (innerTxns.length !== 5) {
+          throw new Error(`expected 5 inner axfers, got ${innerTxns.length}`)
+        }
+        const amounts = innerTxns.map((t) =>
+          Number(t.txn?.txn?.assetTransfer?.amount ?? t.txn?.txn?.aamt ?? 0),
+        )
+        const auditorShare = Math.floor((divisible * SHARE_PCT.auditor) / 100)
+        const maintainerShare = Math.floor((divisible * SHARE_PCT.maintainer) / 100)
+        const adversarialShare = Math.floor((divisible * SHARE_PCT.adversarial) / 100)
+        const treasuryShare = Math.floor((divisible * SHARE_PCT.treasury) / 100)
+        const opsShare =
+          divisible - auditorShare - maintainerShare - adversarialShare - treasuryShare
+        const expected = [auditorShare, maintainerShare, adversarialShare, treasuryShare, opsShare]
+        for (let i = 0; i < 5; i++) {
+          if (amounts[i] !== expected[i]) {
+            throw new Error(`inner axfer ${i}: expected ${expected[i]}, got ${amounts[i]}`)
+          }
+        }
+        console.log(`\n    distribute(): ${distributeTxid}`)
+        console.log(`    Lora: ${loraUrl(distributeTxid)}`)
+        return distributeTxid
+      })
+    }
+
+    if (paymentTxid) console.log(`  (payment txid: ${paymentTxid})`)
   }
 
-  console.log('==========================')
+  console.log('===========================')
+  console.log(`E2E: ${passed} passed, ${failed} failed, ${skipped} skipped`)
   if (failed === 0) {
     console.log('E2E: PASS')
     process.exit(0)
@@ -186,6 +395,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error('E2E: FAIL', e.message)
+  console.error('E2E: FAIL', e.stack ?? e.message)
   process.exit(1)
 })
