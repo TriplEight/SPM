@@ -24,6 +24,9 @@ source changes again.
 
 ## 1. Ordered next steps
 
+0. **Push `spm-spec-closeout` and merge it.** It contains `spm-mainnet` plus this
+   session's work. Run `git push -u origin spm-spec-closeout` outside the sandbox.
+   Open a PR into `master`. Check: CI is green on the PR, and the PR merges.
 1. **Decide the `payTo` variant before any call.** `payTo` is the
    competition leaderboard key.
    - Variant A, the default: `payTo` is the application address. Call
