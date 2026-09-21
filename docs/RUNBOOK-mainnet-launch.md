@@ -215,12 +215,54 @@ time it does, and the volume goes with it.
 
 ---
 
-## 6. Known open items
+## 6. Schedule the reconciliation job
 
-- **The reconciliation job has no scheduler.** `pnpm -C proxy reconcile`
-  (`proxy/src/claims/reconcile-main.ts`) runs the pass, but nothing calls it
-  on a schedule. Add a nightly cron or systemd timer before relying on
-  unmatched-inflow ledgering.
+`pnpm -C proxy reconcile` (`proxy/src/claims/reconcile-main.ts`) runs the
+claims-ledger reconciliation pass. Nothing schedules it by default. Install
+the systemd units in `deploy/systemd/` to run it nightly.
+
+1. Copy both unit files to the host:
+   ```bash
+   sudo cp deploy/systemd/spm-reconcile.service deploy/systemd/spm-reconcile.timer /etc/systemd/system/
+   ```
+2. Edit `/etc/systemd/system/spm-reconcile.service`. Each line marked `EDIT`
+   needs a real value:
+   - `WorkingDirectory`: the deployed `proxy/` path (for example
+     `/opt/spm/proxy`).
+   - `ExecStart`: the absolute path to `node` for the `spm` user. Check with
+     `sudo -u spm which node`. `ProtectHome=true` blocks `/home`, so `node`
+     must live outside it (for example `/usr/bin/node`).
+   - `ReadWritePaths`: the directory that holds `audit.db`. This is
+     `WorkingDirectory` unless the server's `.env` sets `SQLITE_PATH` to
+     somewhere else (`proxy/src/db.ts`).
+3. Create the `spm` user, if it does not exist yet:
+   ```bash
+   sudo useradd --system --no-create-home --shell /usr/sbin/nologin spm
+   ```
+4. Load and enable the timer:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now spm-reconcile.timer
+   ```
+5. Check the timer is scheduled:
+   ```bash
+   systemctl list-timers spm-reconcile.timer
+   ```
+6. Run one pass by hand and check the log:
+   ```bash
+   sudo systemctl start spm-reconcile.service
+   journalctl -u spm-reconcile.service
+   ```
+   A successful run logs `spm-reconcile: checked N inflow(s)` and exits 0.
+
+The reconcile runner only reads the chain through the indexer and the local
+`audit.db`. It never signs or submits a transaction, so the unit needs no
+mnemonic and no wallet secret.
+
+---
+
+## 7. Known open items
+
 - **Payouts are manual.** `scripts/payout.ts` is dry-run by default and takes a
   key-file argument. Check each claim by hand before paying.
 - **A verified claim cannot be re-opened through the API.** `POST /api/v1/claims`
@@ -246,7 +288,7 @@ time it does, and the volume goes with it.
 
 ---
 
-## 7. State at handoff
+## 8. State at handoff
 
 | Check | Result |
 |---|---|

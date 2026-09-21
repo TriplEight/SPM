@@ -73,16 +73,19 @@ source changes again.
    Check: `distribute()` executed on MainNet with five inner transfers
    visible on Lora.
 
-6. **Schedule `pnpm -C proxy reconcile`.** Human action: add a nightly cron
-   or systemd timer on the host. Nothing schedules it today.
-   Check: a scheduler entry exists, and the timer logs one run.
+6. **Install the reconciliation timer.** Human action: install
+   `deploy/systemd/spm-reconcile.service` and `spm-reconcile.timer` on the
+   host. Procedure: `docs/RUNBOOK-mainnet-launch.md` section 6.
+   Check: `systemctl list-timers spm-reconcile.timer` shows a next run, and
+   `journalctl -u spm-reconcile.service` shows one successful pass.
 
 ---
 
 ## 2. Open items
 
-- **The reconciliation job has no scheduler.** `proxy/src/claims/reconcile-main.ts`
-  runs the pass. Nothing calls it on a schedule. See step 6.
+- **The reconciliation timer is not installed.** `proxy/src/claims/reconcile-main.ts`
+  runs the pass. `deploy/systemd/spm-reconcile.{service,timer}` schedule it,
+  but installing them on the host is a human action. See step 6.
 - **Payouts are manual.** `scripts/payout.ts` is dry-run by default and
   takes a key-file argument. Check every claim by hand.
 - **A verified claim cannot be re-opened through the API.** Deliberate: it
