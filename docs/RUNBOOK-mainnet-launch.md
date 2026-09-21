@@ -170,6 +170,26 @@ Before reviewing, measure the hit rate: run the candidate list against 20 real
 That median sets the lockfile price. If it lands below 5, the seed list is
 wrong rather than the price.
 
+### Measure the hit rate
+
+Put one candidate package name per line in a text file. Use `#` for
+comments. Collect 20 real `package-lock.json` files, or point the script at
+a directory that contains them (it finds every `package-lock.json` inside,
+recursively, and skips `node_modules`).
+
+Run:
+
+```bash
+node scripts/hit-rate.mjs candidates.txt <lockfiles-dir>
+```
+
+The script prints a per-file hit count, the median, min, max, and how many
+lockfiles contain each candidate. It prints a WARNING when you give it
+fewer than 20 lockfiles, and a VERDICT line: `median >= 5` or `seed list
+too weak (median < 5)`.
+
+Record the median in `NOTES.md` before you seed any review.
+
 ---
 
 ## 4. Qualify
