@@ -5,6 +5,48 @@ Newest first.
 
 ---
 
+## 2026-09-21 — Align the harness with the MainNet design
+
+**`CLAUDE.md` rewrite.**
+- What: cut from 158 lines to about 100. Removed the `@AGENTS.md` import (211 lines of
+  generic Algorand text). Removed the dependency-security block that `AGENTS.md` repeats.
+  Added a numbered invariant list, a facts table, a command block, sandbox cautions, and
+  orchestration rules.
+- Why: every session loaded about 370 lines, and most of it did not apply to the task.
+- Expected effect: a smaller fixed context per session. Facts appear in one place only.
+
+**Skills.**
+- What: rewrote `spm-split-contract` and `spm-testing`. Removed hackathon text from
+  `spm-audit-status`.
+- Why: `spm-split-contract` taught the deleted per-payment `pay()` split, which breaks
+  invariant 2. `spm-testing` described LocalNet and TestNet gates that no longer exist.
+- Expected effect: agents that load these skills get the current design.
+
+**Subagents.**
+- What: rewrote `algorand-contract-engineer`, `integration-tester`, `mcp-payer-engineer`
+  and `scope-sentinel` for MainNet. Added a 15-line report format with a status first line
+  and a BLOCKED rule to every implementing agent.
+- Why: the old definitions said "12h hackathon", "TestNet", "hr8 sync" and `pay()`.
+- Expected effect: short reports and no drift back to the TestNet design.
+
+**Commands.**
+- What: deleted `/demo`, `/deploy`, `/e2e` and `/seed`. Rewrote `/verify`.
+- Why: `/seed` told an agent to create a `COMMUNITY_REVIEWED` row without a human
+  review, which breaks invariant 5. The other three targeted TestNet and `DEMO.md`.
+- Expected effect: no command runs a superseded flow.
+
+**Other.**
+- What: deleted `bootstrap.sh`. Added `.claude/worktrees/` to `.gitignore`.
+- Why: `bootstrap.sh` overwrote the harness with the hackathon versions. Biome reads
+  `.gitignore`, so an ignored worktree directory keeps `biome ci .` from linting it.
+- Expected effect: no accidental harness rollback, and a clean lint during parallel work.
+
+**Not changed (write-protected; needs a human).** `.claude/settings.json` sets
+`USDC_ASA_ID=10458941` and a TestNet `ALGOD_SERVER` in every session's environment. It
+also allows `npm:*` and `npx:*`, which conflicts with the pnpm-only rule.
+
+---
+
 ## 2026-09-19 — Install `rtk` and document its use
 
 **What.** Installed `rtk` v0.49.0 to `~/.local/bin/rtk`, pinned by `RTK_VERSION`.

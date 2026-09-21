@@ -12,7 +12,7 @@ UNREVIEWED       default on publish        FREE
 AUTO_SCANNED     passed automated checks   FREE
 COMMUNITY_REVIEWED  >=1 signed review      PAID (triggers x402)
 PEER_REVIEWED    >=2 independent reviews   PAID
-(Skip MISSION_CRITICAL_SAFE and CVE_KNOWN for the hackathon.)
+`MISSION_CRITICAL_SAFE` and `CVE_KNOWN` are out of scope. Do not add them.
 
 Payment triggers for COMMUNITY_REVIEWED and above. Everything below is free.
 
