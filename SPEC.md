@@ -1,9 +1,9 @@
-# SPM — Global x402 Challenge Spec (MainNet migration) — v3
+# SPM — Global x402 Challenge Spec
 
 **Audience:** a fresh Claude session with no prior context on this project.
 **Repo:** `github.com/TriplEight/SPM` (public, `master`)
 **v2 (2026-09-19):** open questions resolved (§8), claims ledger added (§5), Bazaar config confirmed against GoPlausible docs (§4.3), attestation envelope decided (§6), pricing revised (§4.2), work sequence reordered to qualify early (§9), second grill pass folded in (§3.3–3.6).
-**v3 (2026-09-19, third grill pass):** `distribute()` fee-drain guard (§3.1); rekey ordering trap (§8); DSSE payload bounded to reviewed entries + free-path rate limit (§6.3); pricing turned into a measured gate (§4.2); third-party-payer recruitment promoted to P0 and started on day 1 (§9); claims ledger named as the cut line; Action fails open (§9 C3).
+**v3 (2026-09-19, third grill pass):** `distribute()` fee-drain guard (§3.1); rekey ordering trap (§8); DSSE payload bounded to reviewed entries + free-path rate limit (§6.3); pricing turned into a measured gate (§4.2); third-party-donor recruitment promoted to P0 and started on day 1 (§9); claims ledger named as the cut line; Action fails open (§9 C3).
 **v4 (2026-09-20, implementation corrections):** fixed method name `getSupported()` (§4.3); the 402 body is `{}` — payment requirements arrive in the `PAYMENT-REQUIRED` header (§4.3, §9 B5); dynamic pricing confirmed present in `@x402-avm/core`, kept out of scope (§4.2, §8); §3.4 handler/settlement ordering resolved from middleware source; rounding unit (1,000 µUSDC) separated from `MIN_DISTRIBUTE` (100,000 µUSDC) (§3.1); A2 acceptance vectors corrected to hold at 1,000 rounding (§9 A2); `GET /v1/attest` free for an unreviewed version, matching §11 (§4.2); `integrity` column added to `audit_status` — a review with no stored integrity resolves to `UNREVIEWED` (§6); confirmed Bazaar `bazaar`-key shape (§4.3); noted a boot-guard/route-validation error-text mismatch as a remaining risk (§8); contract-test harness limitation documented, points to `docs/RUNBOOK-contract-build.md` (§9).
 
 Read this whole document before writing code. §3 lists blockers that invalidate parts of the existing architecture.
@@ -25,7 +25,7 @@ The project won the Algorand x402 Ideathon and has a working TestNet MVP. It is 
 | Network id | `ALGORAND_MAINNET_CAIP2` = `algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=` |
 | Facilitator | **GoPlausible, mandatory** — `https://facilitator.goplausible.xyz`. No local facilitator, no direct submission. |
 | Hosting | Public HTTPS domain. Localhost settlements are filed under the `DEV` source and do not count. |
-| payTo | One fixed MainNet address for the whole competition — it is the leaderboard key. Opted into USDC 31566704. |
+| payTo | One MainNet address for the whole competition — it is the leaderboard key. `setPayTo` changes it only while payTo holds no USDC. It is immutable after. Opted into USDC 31566704. |
 | Discovery | Bazaar discovery extension on every paid route |
 | Tag | `tag: "x402-global-challenge"` in the route's `accepts.extra`. **Attribution is written at settlement time and is not retroactive** — the tag must be present before the first real payment. |
 | Proof of life | ≥1 real MainNet payment settled, paid response returned, USDC in payTo, endpoint in Bazaar + challenge leaderboard |
@@ -40,7 +40,7 @@ The project won the Algorand x402 Ideathon and has a working TestNet MVP. It is 
 
 - **Sept 19** (today) — 11 days to submission.
 - **Sept 30** — submission form closes.
-- **"Through early October"** — organisers' wording for real-usage accrual. Volume is measured over an **unannounced window** and the leaderboard has been live since July. Assume the window may close in the first week of October. **The volume engine (GitHub Action, third-party payers) must be live by Sept 30, not built in October.**
+- **"Through early October"** — organisers' wording for real-usage accrual. Volume is measured over an **unannounced window** and the leaderboard has been live since July. Assume the window may close in the first week of October. **The volume engine (GitHub Action, third-party donors) must be live by Sept 30, not built in October.**
 - **Early November** — 10 finalists (drawn from the top 50) present at Devcon 8, India. Top 20 endpoints share 500K ALGO.
 
 Judging: real usage, use-case quality, technical execution, long-term potential.
@@ -56,18 +56,19 @@ Judging: real usage, use-case quality, technical execution, long-term potential.
 Verified by reading the repo, not by trusting the README.
 
 **Working:**
-- `contracts/` — `SplitRouter` in Algorand TypeScript (Puya-TS), AlgoKit. Methods: `setRecipients`, `optInToAsset`, `attest`, `pay`. TestNet `SPLIT_APP_ID=764063661`. Unit tests pass via `algorand-typescript-testing`.
-- `proxy/` — Hono overlay. npm passthrough, `better-sqlite3` review-status store, hand-rolled 402 gate on tarball paths, `/api/v1/status/:pkg/:version`.
-- `mcp/` — MCP server: `check_audit_status` (free), `install_audited_package` (x402-gated, signs autonomously).
-- `cli/` — `spm` wrapper.
-- `scripts/verify.sh`, `scripts/e2e.mjs`, `scripts/demo.sh` — green on LocalNet.
-- `.claude/` — 5 subagents, 6 commands, Algorand DevRel skills + 4 SPM-specific skills.
+- `contracts/` — `SplitRouter` in Algorand TypeScript (Puya-TS), AlgoKit. Methods: `setPayTo`, `setRecipients`, `optInToAsset`, `distribute`, `attest`, `releaseAuthority`, `setAttestationKey`. `setPayTo` corrects payTo only while it holds zero revenue. A non-zero USDC balance locks it. Unit tests hold the rounding and `MIN_DISTRIBUTE` boundaries via `algorand-typescript-testing`. The committed ARC-56 spec is stale — regenerate it with `algokit project run build` before deploying (`docs/HANDOFF-next-session.md`).
+- `proxy/` — Hono overlay on `paymentMiddlewareFromHTTPServer` and the `onProtectedRequest` free-tier grant. Routes: `POST /v1/attest/lockfile` and `GET /v1/attest` (`proxy/src/routes/attest.ts`), DSSE + in-toto signing (`proxy/src/attest/dsse.ts`), `GET /.well-known/spm-keys.json`. The claims ledger lives in `proxy/src/claims/`: `ledger.ts`, `middleware.ts`, `routes.ts`, `indexer.ts`, `reconcile.ts`, `reconcile-main.ts`, `github.ts`, `attribution-rules.ts`. The repo no longer has `settle.ts` or the EURD path.
+- `mcp/` — MCP server: `check_audit_status` (free), `install_audited_package` (x402-gated, MainNet/TestNet selectable, `wrapFetchWithPayment`). No donation opt-in yet (§4.4).
+- `cli/` — `spm status`, `spm install`, `spm verify` (offline L1). No `spm attest` command yet (§4.4).
+- `.github/actions/spm-attest/` — composite Action (`action.yml`, `attest.mjs`). It sends no wallet credential today. The owner decided the `donate` / `donor-mnemonic` opt-in in §9 C3. It is not built yet.
+- `scripts/verify.sh`, `scripts/guard.sh`, `scripts/e2e.mjs`, `scripts/payout.ts`, `scripts/demo.sh` — `verify.sh` prints PASS, FAIL, or SKIP per check. A check with no funded wallet or facilitator reach degrades to SKIP. It never passes silently.
+- `.claude/` — 5 subagents, 2 commands, 10 Algorand DevRel skills, and 4 SPM-specific skills.
 
-**Stack:** pnpm workspaces, TypeScript, Hono 4.12, `@x402-avm/{core,avm,hono,fetch}` 2.6.1, algosdk 3.5.2, better-sqlite3.
+**Stack:** pnpm workspaces, TypeScript, Hono, `@x402-avm/{core,avm,hono,fetch,extensions}` 2.6.1, `@noble/ed25519`, `@algorandfoundation/algokit-utils@10.0.0-alpha.39`, `better-sqlite3`.
 
 **Note on x402-avm ≥2.6:** the packages dropped `algosdk` in favour of `@algorandfoundation/algokit-utils@10.0.0-alpha.39`. Signer code written against algosdk types must use the 2.6 signer helpers (`toClientAvmSigner`). algosdk stays in the repo for contract/deploy scripts only.
 
-**Not built:** GoPlausible facilitator integration, Bazaar discovery, MainNet config, attestation routes, attestation signing, claims ledger, per-package attribution, GPG identity, ARC-19.
+**Not yet built:** the MainNet deployment itself — no MainNet `SPLIT_APP_ID` exists, so `verify.sh` SKIPs the live checks. Contract artifacts under Puya (regenerate, do not hand-edit). The client donation opt-in: CLI `--donate`, MCP `allowDonation`, Action `donate` input (§4.4). GPG identity and ARC-19 stay out of scope (§10).
 
 ---
 
@@ -93,7 +94,7 @@ client ──facilitator──▶ payTo = SplitRouter app address (plain USDC ax
 
 Reasons this is right regardless of the facilitator:
 1. **Fees.** A per-payment 5-way split is 6 txns ≈ 6,000 µALGO ≈ $0.0005 against a $0.001 payment.
-2. **Leaderboard attribution** needs one fixed payTo; an app address is stable.
+2. **Leaderboard attribution** needs a payTo that stays put once revenue lands. An app address is stable by default.
 3. **Trust story:** "payment settles instantly; revenue distributes atomically and permissionlessly — anyone can trigger a payout, nobody can withhold one." Do **not** say "in the same transaction."
 
 **Contract changes (A2):**
@@ -324,6 +325,22 @@ for s in x402-global-challenge bazaar direct dev; do
 ```
 If volume lands under `dev` or `direct`, attribution is broken.
 
+### 4.4 Client donation opt-in
+
+The CLI, the MCP server, and the Action share one behaviour. Donation is off by default.
+
+Opt-in names: CLI `--donate`, MCP argument `allowDonation: true`, Action input `donate: 'true'`. It applies to reviewed tarball installs and to lockfile attestation.
+
+Without the opt-in, a 402 does not pay. The CLI exits 2. The MCP tool returns `status: 'donation_required'` with the price and the resource.
+
+Key: env `SPM_DONOR_MNEMONIC`. No stored credential file.
+
+Spend cap: a client refuses to sign above 20,000 microUSDC per request, or for any asset other than the network's USDC ASA. There is no config knob.
+
+New client entry points: CLI `spm attest <lockfile> [--donate] [--out <path>]`, MCP tool `attest_lockfile`.
+
+Reason: a lockfile that pins a reviewed version must work the same way on every surface.
+
 ---
 
 ## 5. Contributor claims (resolved — was open question 2)
@@ -359,7 +376,7 @@ payouts(identity, role, amount_micro, txid, paid_at)
 
 **Write path:** a Hono middleware registered *outside* the payment middleware. After `next()`, if the response carries `PAYMENT-RESPONSE` with success, decode the settle txid and write accruals from attribution data the handler put on the context (`c.set('attribution', …)`). No dependency on undocumented resource-server hooks.
 
-**Reconciliation:** a nightly job lists USDC axfers into payTo (indexer) and compares them with ledger `settle_txid`s. Unmatched inflows (crash between settle and write, direct deposits) are ledgered as `unassigned`.
+**Reconciliation:** a nightly job lists USDC axfers into payTo (indexer) and compares them with ledger `settle_txid`s. Unmatched inflows (crash between settle and write, direct deposits) are ledgered as `unassigned`. The runner is `pnpm -C proxy reconcile` (`proxy/src/claims/reconcile-main.ts`). An external cron job or systemd timer starts it nightly. It skips inflows confirmed less than 900 seconds ago (`MIN_INFLOW_AGE_SECONDS`). This closes the race between settlement and the accrual write. The indexer URL comes from `INDEXER_URL`.
 
 ### 5.3 Claim flow (MVP)
 
@@ -486,7 +503,7 @@ A paid security attestation on MainNet that claims a human review that did not h
 - **Seed selection:** small, ubiquitous transitive dependencies that a human can genuinely review in 15–30 minutes and that appear in most lockfiles (tiny single-purpose packages such as `ms`, `inherits`, `once`, `wrappy`, `balanced-match`, `escape-string-regexp` — confirm by frequency across a sample of real lockfiles). This maximises lockfile hit-rate (§4.2) *and* keeps the reviews honest. Big packages (lodash, react) are out until there is reviewer capacity.
 - **Target 15–30 packages**, not 20–50. Split reviews between Denis and Vasiliy.
 - The tier name `COMMUNITY_REVIEWED` implies more than one reviewer. Either keep it and let `reviewer` make single-reviewer status explicit, or rename to `REVIEWED` before the first MainNet attest. **Decide before B4** — names are immutable once anchored.
-- Qualification payments from team wallets are labelled as such in `NOTES.md` and the submission. The "who is paying" answer must rest on third-party payers (§9 P0).
+- Qualification payments from team wallets are labelled as such in `NOTES.md` and the submission. The "who is paying" answer must rest on third-party donors (§9 P0).
 
 ---
 
@@ -517,7 +534,7 @@ Reordered versus v1: **qualify on the simplest route first**, then build the vol
 
 **Start P0 on day 1, before any code.** It is the longest-lead item in the plan and the only one whose latency is other people's.
 
-**P0. Recruit third-party payers (spans the whole plan; owner: Denis).** Line up 3–10 external repos — DevCult network, hackathon peers, ideathon contacts — that will run `spm-attest` **with their own wallets**. Each one needs a MainNet Algorand address, a USDC opt-in, and a few dollars of USDC on Algorand. **Acquiring Algorand-native USDC is the bottleneck**: most people hold nothing on Algorand, and an exchange withdrawal or bridge hop takes days, not minutes. Send the ask and the funding instructions on day 1; chase on day 4 and day 7. Getting the Action merged (C3) is the easy half.
+**P0. Recruit third-party donors (spans the whole plan; owner: Denis).** Line up 3–10 external repos — DevCult network, hackathon peers, ideathon contacts — that will run `spm-attest` **with their own wallets**. Each one passes `donate: 'true'` and its own `donor-mnemonic` secret. Each one needs a MainNet Algorand address, a USDC opt-in, and a few dollars of USDC on Algorand. **Acquiring Algorand-native USDC is the bottleneck**: most people hold nothing on Algorand, and an exchange withdrawal or bridge hop takes days, not minutes. Send the ask and the funding instructions on day 1; chase on day 4 and day 7. Getting the Action merged (C3) is the easy half.
 *Check:* by D8, ≥3 external addresses are funded and opted in, confirmed on-chain — before the Action even exists.
 
 Why this outranks everything below it: qualification needs one payment the team can make itself, but placement and the submission form's "proof of who is paying" both need strangers. Every engineering item here is under the team's control; this one is not.
@@ -549,7 +566,7 @@ client. See `docs/RUNBOOK-contract-build.md`.
 *Check:* app/payTo shows the USDC opt-in on MainNet; explorer links in `NOTES.md`.
 
 **B2. MainNet config.** `ALGORAND_MAINNET_CAIP2`, `USDC_MAINNET_ASA_ID`, `ALGOD_SERVER=https://mainnet-api.algonode.cloud`, `FACILITATOR_URL=https://facilitator.goplausible.xyz`, `SPLIT_APP_ADDRESS`, `ATTEST_SIGNING_KEY`. Update `.env.example`.
-*Check:* the server refuses to boot if `/supported` lacks MainNet `exact`; it logs the resolved `feePayer`.
+*Check:* the server refuses to boot if `/supported` lacks MainNet `exact`; it logs the resolved `feePayer`. The guard selects only a supported kind with `x402Version` 2. A mismatch fails with an error that names `x402Version`.
 
 **B3. Deploy to public HTTPS** on one root domain (fly.io / Railway / VPS + Caddy). Add `og:*` metadata at the domain root.
 *Check:* `curl -sI "https://<domain>/v1/attest?name=ms&version=2.1.3"` → 402 from the public internet.
@@ -571,7 +588,7 @@ client. See `docs/RUNBOOK-contract-build.md`.
 **C2. Seed reviews to 15–30 packages** (§7) — starts day 2, runs in parallel with everything; human review time is the bottleneck. Gate on the hit-rate measurement in §4.2 before reviewing anything.
 *Check:* the hit-rate median is recorded in `NOTES.md`; `/api/v1/status` returns the tier, reviewer, scope, and MainNet attest txid for each package.
 
-**C3. `spm-attest` GitHub Action** — triggers on `pull_request` / `push` only (never `schedule:`), reads a wallet secret, POSTs raw lockfile bytes, uploads the envelope as an artifact, and optionally fails on `INTEGRITY_MISMATCH`. **Fails open by default:** a facilitator outage, a 5xx, or a missing wallet secret logs a warning and exits 0. An attestation step that can redden someone else's CI gets removed from their repo the first time it does, and that is the volume gone.
+**C3. `spm-attest` GitHub Action** — triggers on `pull_request` / `push` only (never `schedule:`). Donation is off by default. Without it, the Action attests zero-coverage lockfiles only. A 402 logs a warning and exits 0. Input `donate: 'true'` opts in. Input `donor-mnemonic` takes a GitHub secret and maps to env `SPM_DONOR_MNEMONIC`. The Action is composite: it sets up pnpm, runs `pnpm install --frozen-lockfile --filter cli...` in the action checkout, then runs `spm attest`. It POSTs raw lockfile bytes, uploads the envelope as an artifact, and optionally fails on `INTEGRITY_MISMATCH`. **Fails open by default:** a facilitator outage, a 5xx, or a missing secret with `donate` set logs a warning and exits 0. An attestation step that can redden someone else's CI gets removed from their repo the first time it does, and that is the volume gone.
 *Check:* runs green on the SPM repo and on one external repo; with `FACILITATOR_URL` pointed at a dead host it warns and still exits 0.
 
 **C4. Claims ledger MVP** (§5): accrual middleware, reconciliation job, earnings endpoint, claim registration with gist/repo-file verification, and a local payout script. **This is the designated cut line.** It is the largest item in Phase C and the only one that neither qualifies the entry nor produces volume. If the schedule slips, ship the accrual middleware and the reconciliation job alone — the ledger keeps accruing correctly and nothing is lost but the claim UX — and move the earnings endpoint, claim verification, and payout script to Phase 2. Do not trade P0 or C3 time for it.
@@ -579,7 +596,7 @@ client. See `docs/RUNBOOK-contract-build.md`.
 
 ### Phase D — submit and seed real usage (D9–D11, before Sept 30)
 
-- **D1** Land P0: the recruited repos merge the Action and make their first paid calls from their own wallets. Confirm each shows up as a distinct payer under `cat=payers`. This is the "proof of who is paying," and it is the one item that cannot be compressed on the last day.
+- **D1** Land P0: the recruited repos merge the Action with `donate: 'true'` and their own `donor-mnemonic` secret, and make their first paid calls from their own wallets. Confirm each shows up as a distinct donor under `cat=payers`. This is the "proof of who is paying," and it is the one item that cannot be compressed on the last day.
 - **D2** MCP server on MainNet (`@x402-avm/fetch` `wrapFetchWithPayment`) — agents discovering SPM via the Bazaar / GoPlausible Universal Client are also real callers.
 - **D3** Repo hygiene: remove `.DS_Store`, stray tracked log files, stray `proxy/pnpm-workspace.yaml`; reconcile workspaces; README `npm install` → `pnpm install`; `.gitignore` gets `.DS_Store`, `*.log`.
 - **D4** README rewrite for MainNet: endpoints, prices, how to call, how to verify, leaderboard link.
@@ -607,7 +624,7 @@ Use the `scope-sentinel` subagent before anything sizable.
 - Scheme `exact`. Middleware price is a USD string; on-chain amounts are integer µ-units. **Never floats.** Every price is a multiple of 1,000 µUSDC.
 - `extra = { asset, feePayer, tag: "x402-global-challenge" }` on every paid route.
 - Split **50/20/15/10/5** → per 1,000 µUSDC: 500/200/150/100/50.
-- Facilitator `https://facilitator.goplausible.xyz`, mandatory. It pays network fees for payers; `distribute()` fees are SPM's.
+- Facilitator `https://facilitator.goplausible.xyz`, mandatory. It pays network fees for donors; `distribute()` fees are SPM's.
 - Status `< COMMUNITY_REVIEWED` never returns 402 — tarball, single attest, and zero-coverage lockfile alike.
 - Version bump → `UNREVIEWED`. The narrative spine.
 - Attestations: DSSE + in-toto Statement v1, ed25519, dedicated unfunded service key.
@@ -618,26 +635,30 @@ Use the `scope-sentinel` subagent before anything sizable.
 
 ## 12. Files to change
 
-| Path | Change |
-|---|---|
-| `CLAUDE.md` | MainNet constants; invariants: "payTo is fixed and is the leaderboard key", "never split per-payment", "extra.asset always explicit", "unreviewed never 402", "seeded reviews are real reviews"; remove TestNet-only constraint |
-| `contracts/.../contract.algo.ts` | `distribute()`; drop MainNet `pay()`; amount-agnostic; `integrity` in `attest()`; optional `setAttestationKey()` / `releaseAuthority()` |
-| `contracts/.../contract.algo.spec.ts` | Remainder/dust tests (A2) |
-| `proxy/src/app.ts` | `paymentMiddlewareFromHTTPServer`; `onProtectedRequest` free tier; routes + Bazaar + `extra`; ledger middleware; `.well-known/spm-keys.json` |
-| `proxy/src/settle.ts` | **Delete** |
-| `proxy/src/routes/attest.ts` | **New** — lockfile + single attestation, pre-validation, zero-coverage free path |
-| `proxy/src/attest/dsse.ts` | **New** — PAE, sign, verify |
-| `proxy/src/claims/*` | **New** — ledger, reconciliation, earnings, claims verification |
-| `scripts/payout.ts` | **New** — local, batched, dry-run by default |
-| `cli/` | `spm verify` (L1) |
-| `.github/actions/spm-attest/` | **New** — composite Action |
-| `mcp/src/tools/install.ts` | Remove EURD; MainNet; `wrapFetchWithPayment` |
-| `mcp/package.json` | Drop `@ever_amsterdam/x402-euro-eurd` |
-| `proxy/package.json` | Add `@x402-avm/extensions`, `@noble/ed25519` (exact pins) |
-| `.env.example` | MainNet block; `ATTEST_SIGNING_KEY`; no pool/recipient mnemonics |
-| `scripts/verify.sh` | MainNet smoke: 402 → pay → 200 → USDC delta → envelope verifies |
-| `README.md` | MainNet rewrite; `pnpm install` |
-| `.gitignore` | `.DS_Store`, `*.log` |
+| Path | Change | Status |
+|---|---|---|
+| `CLAUDE.md` | MainNet constants; invariants: "payTo is the leaderboard key; `setPayTo` changes it only while payTo holds no USDC", "never split per-payment", "extra.asset always explicit", "unreviewed never 402", "seeded reviews are real reviews" | Done |
+| `contracts/smart_contracts/split_router/contract.algo.ts` | `distribute()`; `setPayTo()`; drop MainNet `pay()`; amount-agnostic; `integrity` in `attest()`; `setAttestationKey()`; `releaseAuthority()` | Done — Puya rebuild (`algokit project run build`) still pending |
+| `contracts/smart_contracts/split_router/contract.algo.spec.ts` | Remainder/dust tests (A2) | Done |
+| `proxy/src/app.ts` | `paymentMiddlewareFromHTTPServer`; `onProtectedRequest` free tier; routes + Bazaar + `extra`; ledger middleware; `.well-known/spm-keys.json` | Done |
+| `proxy/src/settle.ts` | Delete | Done |
+| `proxy/src/routes/attest.ts` | Lockfile + single attestation, pre-validation, zero-coverage free path | Done |
+| `proxy/src/attest/dsse.ts` | PAE, sign, verify | Done |
+| `proxy/src/claims/ledger.ts`, `middleware.ts`, `routes.ts`, `attribution-rules.ts`, `github.ts` | Accrual ledger, write-path middleware, earnings/claims routes, attribution rules, GitHub proof verification | Done |
+| `proxy/src/claims/indexer.ts` | Lists confirmed USDC axfers into payTo from the indexer (§5.2) | Done |
+| `proxy/src/claims/reconcile-main.ts` | Nightly reconciliation entry point, `pnpm -C proxy reconcile` (§5.2) | Done |
+| `scripts/payout.ts` | Local, batched, dry-run by default | Done |
+| `cli/src/verify.ts` | `spm verify` (L1) | Done |
+| `cli/src/attest.ts` | `spm attest <lockfile> [--donate] [--out <path>]` (§4.4) | Not built |
+| `.github/actions/spm-attest/` | Composite Action (`action.yml`, `attest.mjs`) | Done — `donate` / `donor-mnemonic` inputs not built (§9 C3, §4.4) |
+| `mcp/src/tools/install.ts` | Remove EURD; MainNet; `wrapFetchWithPayment` | Done |
+| `mcp/src/donor.ts` | Reads `SPM_DONOR_MNEMONIC`, enforces the spend cap, backs `allowDonation` and the `attest_lockfile` tool (§4.4) | Not built |
+| `mcp/package.json` | Drop `@ever_amsterdam/x402-euro-eurd` | Done |
+| `proxy/package.json` | Add `@x402-avm/extensions`, `@noble/ed25519` (exact pins) | Done |
+| `.env.example` | MainNet block; `ATTEST_SIGNING_KEY`; `INDEXER_URL`; no pool/recipient mnemonics on the server | Done |
+| `scripts/verify.sh` | MainNet smoke: 402 → pay → 200 → USDC delta → envelope verifies | Done — live steps SKIP without a funded wallet |
+| `README.md` | MainNet rewrite; `pnpm install` | Done |
+| `.gitignore` | `.DS_Store`, `*.log` | Done |
 
 ---
 
@@ -655,8 +676,15 @@ Use the `scope-sentinel` subagent before anything sizable.
 - [ ] Form submitted; repo submitted to Electric Capital
 
 **Placement (by Sept 30, running into early October) — in priority order:**
-- [ ] **≥3 external payers funded, opted in, and settling from their own wallets** (P0) — visible as distinct addresses under `cat=payers`
+- [ ] **≥3 external donors funded, opted in, and settling from their own wallets** (P0) — visible as distinct addresses under `cat=payers`
 - [ ] `spm-attest` Action running on those repos, failing open
 - [ ] Lockfile route live with zero-coverage free path; hit-rate median recorded
 - [ ] 15–30 genuinely reviewed packages anchored on MainNet
 - [ ] Claims ledger accruing (earnings endpoint and claim verification may slip to Phase 2)
+
+---
+
+## 14. Post-MVP TODO
+
+1. Publish the CLI to npm. The Action then runs a pinned published package instead of building from source.
+2. Make the spend cap configurable. The client hardcodes it at 20,000 microUSDC per request today (§4.4).
