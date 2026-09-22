@@ -71,4 +71,3 @@ Search these repositories for real-world code examples:
 
 - **New to Algorand?** Read `algorand-core` skill first for AVM mental model
 - **Project scaffolding and CLI**: See `algorand-project-setup` skill
-- **React frontends**: See `algorand-frontend` skill

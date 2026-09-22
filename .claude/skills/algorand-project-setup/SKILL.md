@@ -63,5 +63,4 @@ Always fetch corresponding test files alongside contract examples.
 ## Cross-References
 
 - **`algorand-core`** — AVM mental model, transaction types, protocol concepts
-- **`algorand-typescript`** / **`algorand-python`** — Contract development syntax and patterns
-- **`algorand-frontend`** — React frontend integration and wallet connection
+- **`algorand-typescript`** — Contract development syntax and patterns
