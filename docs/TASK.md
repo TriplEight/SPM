@@ -70,7 +70,7 @@ Acceptance:
   secret scan.
 - `prek run --all-files` passes on a clean tree. CI is green.
 
-### H2. Claude Code hooks
+### H2. Claude Code hooks — DONE ff2553b
 
 Approved by the user on 2026-09-22. The edit still needs the permission prompt.
 
@@ -87,7 +87,7 @@ Result:
 Acceptance: each hook fires once in a manual test. Log the change in
 `.claude/HARNESS-CHANGELOG.md`.
 
-### H3. Remove unused skills
+### H3. Remove unused skills — DONE 1c0b701
 
 Approved by the user on 2026-09-22. The deletion still needs the permission prompt.
 
