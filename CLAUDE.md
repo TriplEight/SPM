@@ -2,12 +2,17 @@
 
 SPM is an npm-compatible registry overlay for the Global x402 Challenge on Algorand MainNet.
 - Unreviewed packages pass through to npm for free.
-- Human-reviewed packages return HTTP 402. A donor pays USDC through the GoPlausible facilitator.
-  Clients donate only on opt-in (`--donate`, `allowDonation`, `donate: 'true'`), key `SPM_DONOR_MNEMONIC`.
-- USDC accrues at one fixed `payTo`. `SplitRouter.distribute()` fans it out 50/20/15/10/5.
-- `POST /v1/attest/lockfile` is the volume route. It returns a signed attestation for a lockfile.
+- A human-reviewed package costs 1,000 µUSDC, paid by a donor through the GoPlausible
+  facilitator. Clients donate only on opt-in (`--donate`, `allowDonation`, `donate: 'true'`),
+  key `SPM_DONOR_MNEMONIC`. Plain `npm install` stays free (ADR 0006).
+- USDC accrues at one fixed `payTo`. It takes payments before it is rekeyed to `PaymentRouter`.
+  A nightly job credits balances in numbered batches. The auditor and ops claim.
+  Target split 40/10/20/15/10/5; MVP 40 auditor / 60 ops.
+- `POST /v1/attest/lockfile` is the volume route: one signed attestation and one settlement per
+  lockfile, 1,000 µUSDC per reviewed entry.
 
-**Spec: `SPEC.md`.** Current state and next steps: `docs/HANDOFF-next-session.md`.
+**Spec: `SPEC.md`.** Terms: `CONTEXT.md`. Decisions: `docs/adr/`.
+Next steps and work items: `docs/TASK.md`.
 Operator procedures: `docs/RUNBOOK-*.md`. Session log: `NOTES.md`.
 Generic Algorand and AlgoKit guidance: `AGENTS.md` (read only when you need it).
 
@@ -15,16 +20,22 @@ Generic Algorand and AlgoKit guidance: `AGENTS.md` (read only when you need it).
 
 WARNING: every change preserves these. A violation costs money or a false security claim.
 
-1. `payTo` is the leaderboard key. It changes only while it holds no USDC.
-2. Never split per payment. Say "distributes atomically and permissionlessly".
-   Never say "in the same transaction".
+1. `payTo` is the leaderboard key. It never changes after the first USDC arrives.
+   `payTo` opts into USDC before the rekey to `PaymentRouter`. Never reverse this order.
+2. Never split per payment. Never say "in the same transaction".
+   Never call `credit()` permissionless.
 3. `extra = { asset, feePayer, tag: "x402-global-challenge" }` on every paid route.
    `asset` is always explicit. An omitted asset can resolve to ALGO.
-4. Unreviewed never returns 402: tarball, single attest, and zero-coverage lockfile.
+4. Unreviewed content never returns 402. A reviewed tarball returns 402 only with
+   `X-SPM-Donate: 1`. `X-SPM-Donate: 0` on an attestation route gets a free partial
+   attestation. Never withhold an `INTEGRITY_MISMATCH` or `UNRESOLVABLE` entry.
 5. A `COMMUNITY_REVIEWED` record means a human read that exact tarball.
    Never create a review record in code, in a shipped fixture, or in a seed script.
+   A review record needs a review anchor signed by that auditor's address.
 6. The facilitator is mandatory. No local facilitator. No direct chain submission.
-7. Money is integer micro-units. Never use floats.
+7. Money is integer micro-units. Never use floats. SQLite money columns are `INTEGER`.
+8. Public texts show the target split and the MVP split. Never claim a share goes to a role
+   that is not onboarded.
 
 `bash scripts/guard.sh` enforces the invariants that grep can see.
 
@@ -36,9 +47,12 @@ WARNING: every change preserves these. A violation costs money or a false securi
 | MainNet CAIP-2 | `algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=` |
 | USDC ASA | MainNet 31566704. TestNet 10458941 (rehearsal only). 6 decimals. |
 | Facilitator | `https://facilitator.goplausible.xyz`. Client method `getSupported()`, not `supported()`. |
-| Prices (microUSDC) | lockfile 20,000; zero-coverage lockfile free; single attest 1,000; reviewed tarball 1,000 |
-| Split per 1,000 | 500 / 200 / 150 / 100 / 50 |
-| `distribute()` floor | `MIN_DISTRIBUTE` 100,000 microUSDC; outer fee at least 6,000 microALGO |
+| Prices (microUSDC) | 1,000 per reviewed package on every route; lockfile 1,000 × reviewed entries, no cap, no discount; 0 reviewed = free |
+| Split per 1,000 | Target 400 / 100 / 200 / 150 / 100 / 50. MVP: auditor 400, ops 600 |
+| `claim()` floor | `MIN_CLAIM` 100,000 microUSDC; outer fee at least 2,000 microALGO |
+| Store | SQLite, one writer (ADR 0001). Docker Compose, one service. Nightly off-host copy. |
+| `credit()` | `credit(batchSeq, attributedTotal, unattributedTotal, entries)`, one call per batch (ADR 0005) |
+| Review anchor | 0-ALGO self-payment by the auditor, ARC-2 note `spm:j{...}` (ADR 0007). No `attest()` in the contract. |
 | Attestations | DSSE + in-toto Statement v1, ed25519, unfunded service key. Never `algosdk.signBytes`. |
 | Single attest | `GET /v1/attest?name=@babel/core&version=7.25.2` (query params; scoped names contain `/`) |
 
@@ -49,15 +63,16 @@ The attribution tag applies at settlement and is not retroactive.
 
 | Path | Content | Subagent |
 |---|---|---|
-| `contracts/` | `SplitRouter` (Puya-TS) | `algorand-contract-engineer` |
-| `proxy/` | Hono overlay, x402 routes, DSSE, SQLite status store, claims ledger | `x402-proxy-engineer` |
+| `contracts/` | `PaymentRouter` (Puya-TS) | `algorand-contract-engineer` |
+| `proxy/` | Hono overlay, x402 routes, DSSE, SQLite status store, ledger, nightly job | `x402-proxy-engineer` |
 | `mcp/`, `cli/` | MCP server and `spm` CLI: `install`, `attest` (opt-in `--donate`), offline `verify` | `mcp-payer-engineer` |
 | `.github/actions/spm-attest/` | CI Action; runs `spm attest`. Fails open. Never reddens a user's CI. | — |
 | `scripts/` | `verify.sh`, `guard.sh`, `e2e.mjs`, `payout.ts`. Reconcile: `pnpm -C proxy reconcile` | `integration-tester` |
 
-Skills: `spm-x402-flow`, `spm-audit-status`, `spm-split-contract`, `spm-testing`.
-Algorand reference skills: `algorand-core`, `algorand-typescript`, `algorand-x402-typescript`.
-Scope questions go to `scope-sentinel`. The out-of-scope list is `SPEC.md` §10.
+Skills: `spm-x402-flow`, `spm-audit-status`, `spm-payment-router`, `spm-testing`.
+Algorand reference skills: `algorand-core`, `algorand-typescript`, `algorand-x402-typescript`,
+`algokit-utils-ts`, `algorand-project-setup`.
+Scope questions go to `scope-sentinel`. The out-of-scope list is `SPEC.md` §15.
 
 ## Commands
 
@@ -81,7 +96,8 @@ Never weaken an assertion to make a check pass.
 
 - pnpm only. Pin exact: `pnpm add --save-exact <pkg>@<version>`. Justify each new dependency.
 - Run `pnpm audit --audit-level=moderate` after you add a dependency.
-- Secrets live in `.env` (gitignored). Pool mnemonics are cold and never touch the server.
+- Secrets live in `.env` (gitignored). Cold keys (`payTo`, deployer, admin, auditors) never
+  touch the server. The server holds only the crediter key and the unfunded attestation key.
 - Never log or hardcode a mnemonic or a private key.
 - No AI attribution in code, comments, docs, or commits.
 - After a unit of work, append a dated entry to `NOTES.md` (`/handoff`).
@@ -92,8 +108,9 @@ Never weaken an assertion to make a check pass.
 
 - One work item per subagent. Give it the spec excerpt, the file list, and the acceptance checks.
 - Parallel subagents each get their own worktree (`.claude/worktrees/`, gitignored).
-  CAUTION: a new worktree starts from `master`, not from the current branch. Put
-  `git reset --hard <current HEAD sha>` as step 1 of every worktree subagent prompt.
+  CAUTION: a new worktree starts from `master`, not from the current branch. `git reset --hard`
+  is denied in a subagent. Sync a worktree with `git merge --ff-only <sha>`. A worktree cannot
+  check out a commit that changes `.claude/settings.json`; start such agents from `master`.
 - A subagent report is at most 15 lines. Line 1 is DONE, BLOCKED or FAILED.
 - The orchestrator reruns every acceptance check before it accepts an item.
 - If the spec is ambiguous or conflicts with the code, stop and ask. Never guess.

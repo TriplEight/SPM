@@ -1,0 +1,339 @@
+# Task — MVP to SPEC.md v6 and MainNet qualification
+
+This is the single "what next" document. `NOTES.md` is the log. Update both after each unit of
+work (`/handoff`).
+
+## Role
+
+You are the orchestrator for the SPM project. You plan, delegate and verify.
+You never write production code yourself. Sonnet subagents do all
+implementation (`model: "sonnet"`). Follow `CLAUDE.md` § Orchestration.
+
+## Goal
+
+Bring the code to SPEC.md v6 and qualify on MainNet. There are two tracks:
+
+- **Track Q (qualification, first real MainNet payment by Sept 25).** It does not need
+  PaymentRouter. `payTo` is a plain account that is opted into USDC and takes payments. The
+  ledger accrues from the first payment.
+- **Track R (PaymentRouter, done before the first claim).** It replaces SplitRouter, passes
+  the TestNet rehearsal, then `payTo` is rekeyed on MainNet and the nightly job credits the
+  backlog.
+
+The deadline is Sept 29. The form is submitted on Sept 27.
+
+## Inputs
+
+Read these before you plan:
+
+- `CLAUDE.md` (invariants, canonical facts).
+- `SPEC.md` §9.2 (timeline), §10 (constraints), §11 (routes, pricing, opt-in), §12
+  (attestations), §13 (ledger, nightly job, claims), §14 (review flow), §15 (do-not-build),
+  §17 (work sequence).
+- `CONTEXT.md` (terms) and `docs/adr/0001`–`0008`.
+
+Decided in v6 (do not reopen): SQLite stays; credit batches; tarball 402 only with
+`X-SPM-Donate: 1`; partial attestation on `X-SPM-Donate: 0`; the auditor anchors each review
+with a note transaction; 1,000 µUSDC per reviewed package with no discount.
+
+## Setup
+
+1. `git fetch origin`. Create branch `spm-mvp-v6` from `origin/master` after the v6 spec PR is
+   merged.
+2. Worktree subagents start from `master`. A new worktree cannot check out a commit that
+   changes `.claude/settings.json`. `git reset --hard` is denied in a subagent. Use
+   `git merge --ff-only <sha>` when a worktree must sync.
+3. Merge each subagent branch into `spm-mvp-v6` in the main tree.
+4. Run `scripts/verify.sh` and proxy tests with the Bash sandbox disabled.
+
+## Work items
+
+Each item states the result and the acceptance checks. Put the acceptance checks in the
+subagent prompt. Run them again yourself before you accept an item.
+
+### H1. prek replaces `.githooks` (first)
+
+Result:
+- A prek config at the repo root. On `pre-commit`: `bash scripts/guard.sh`,
+  `pnpm exec biome ci .`, `pnpm typecheck`, a secret scan (gitleaks, pinned), `actionlint`
+  and `zizmor` on `.github/`. On `pre-push`: the unit tests of the four packages and
+  `node --test scripts/*.test.mjs`.
+- `prek install` for both hook types. Delete `.githooks/` (replace, do not deprecate).
+- CI runs `prek run --all-files` in place of its separate guard, Biome and typecheck steps.
+  CI keeps its test steps.
+- `verify.sh` calls `prek run --all-files` for its lint part, then runs tests and e2e.
+- `CLAUDE.md` § Commands lists `prek run --all-files`.
+- Justify each hook repository and pin it to a full commit SHA or an exact version.
+
+Acceptance:
+- A commit with a planted Biome error fails at the hook. A planted fake mnemonic fails the
+  secret scan.
+- `prek run --all-files` passes on a clean tree. CI is green.
+
+### H2. Claude Code hooks
+
+Approved by the user on 2026-09-22. The edit still needs the permission prompt.
+
+The sandbox write-protects `.claude/settings.json` and `.claude/hooks/`. Draft the change;
+the user applies or approves it.
+
+Result:
+- `PostToolUse` on `Edit|Write`: `pnpm exec biome check --write <file>` for files Biome
+  covers.
+- `PreToolUse` on `Bash`: block a command that prints a `*_MNEMONIC` value, and block
+  `git push` to `master`.
+- No `Stop` hook that runs `verify.sh` (slow; a failing Stop hook loops the agent).
+
+Acceptance: each hook fires once in a manual test. Log the change in
+`.claude/HARNESS-CHANGELOG.md`.
+
+### H3. Remove unused skills
+
+Approved by the user on 2026-09-22. The deletion still needs the permission prompt.
+
+Delete `.claude/skills/{algorand-python,algorand-x402-python,algokit-utils-py,
+algorand-frontend,algorand-ecosystem}`. Remove their rows from `AGENTS.md`. The sandbox
+write-protects `.claude/skills`; use `trash` with the user's approval.
+
+Acceptance: `rg -n 'algorand-python|x402-python|algokit-utils-py|algorand-frontend|algorand-ecosystem'
+AGENTS.md CLAUDE.md .claude` is empty.
+
+### Q1. Tarball: 402 only with donation opt-in
+
+Result (SPEC §10.4, ADR 0006): the `onProtectedRequest` hook grants access to an unreviewed
+tarball, and to a reviewed tarball unless the request sends `X-SPM-Donate: 1`. Every tarball
+response carries `X-SPM-Tier`. A free reviewed tarball carries `X-SPM-Donate-Hint: 1000`.
+
+Acceptance: tests for unreviewed → 200; reviewed, no header → 200 with `X-SPM-Tier`;
+reviewed, `X-SPM-Donate: 1` → 402; unreviewed, `X-SPM-Donate: 1` → 200.
+
+Owner: `x402-proxy-engineer`.
+
+### Q2. Attestation routes: partial attestation and statement changes
+
+Result (SPEC §11.2, §12.3):
+- `X-SPM-Donate: 0` on `/v1/attest` or `/v1/attest/lockfile` returns a free partial
+  attestation, before the payment middleware. It withholds reviewed entries whose integrity
+  matches. `predicate.withheld` = the count; `absentMeans: "UNREVIEWED_OR_WITHHELD"`.
+  `INTEGRITY_MISMATCH` and `UNRESOLVABLE` entries are always listed.
+- A full attestation has `predicate.withheld: 0`.
+- Remove `predicate.registryAppId`. Rename `attestTxid` to `anchorTxid` everywhere.
+- The partial path shares the per-IP rate limit of the zero-coverage path.
+
+Acceptance: tests for a partial lockfile with 2 reviewed, 1 mismatch, 1 unresolvable →
+withheld 2, mismatch and unresolvable listed; no header → 402; `spm verify` accepts a partial
+attestation.
+
+Owner: `x402-proxy-engineer`.
+
+### Q3. Lockfile price per reviewed package
+
+Result (SPEC §11.2, ADR 0008): the lockfile route price is a `DynamicPrice` function of
+1,000 µUSDC × N, where N counts reviewed entries whose integrity matches. N comes from the
+same code that builds the attestation. The Bazaar description says "$0.001 per reviewed
+package". Attribution writes exact role shares per reviewed package; delete the pro-rata
+remainder rule.
+
+Acceptance: a lockfile with 3 reviewed entries → the decoded `PAYMENT-REQUIRED` amount is
+`"3000"`; accruals sum to exactly 3,000; `validateDiscoveryExtension(decl.bazaar).valid`
+stays true.
+
+Depends on Q2. Owner: `x402-proxy-engineer`.
+
+### Q4. Clients: opt-in header and spend cap
+
+Result (SPEC §11.4):
+- CLI, MCP and Action send `X-SPM-Donate: 1` with the opt-in and `X-SPM-Donate: 0` without it.
+- Spend cap: 1,000 µUSDC × the lockfile entries sent (1,000 for a tarball or one package),
+  USDC only. Remove the fixed 20,000 cap.
+- Without opt-in: the CLI prints the withheld count and exits 0; the MCP tool returns the
+  partial attestation with `status: 'donation_required'`; the Action passes and prints the
+  count.
+
+Acceptance: tests for both header values; a 402 above the cap is refused; a lockfile with 25
+reviewed entries is paid.
+
+Owner: `mcp-payer-engineer`.
+
+### Q5. Delete claim registration, GitHub proofs, `seed.ts`, `payout.ts`
+
+Result: delete `POST /api/v1/claims`, `proxy/src/claims/github.ts`, the `claims` table,
+`proxy/src/seed.ts` and `scripts/payout.ts`, and every reference to them (`package.json`,
+docs, `demo.sh`, `e2e.mjs`, `CLAUDE.md` repo map). Keep `GET /api/v1/earnings/github/:login`.
+
+Acceptance: `rg -n 'api/v1/claims|seed\.ts|payout\.ts' proxy cli mcp scripts CLAUDE.md` is
+empty; tests pass.
+
+Owner: `x402-proxy-engineer`.
+
+### Q6. Review anchor and `record-review`
+
+Result (SPEC §14, ADR 0007):
+- `scripts/anchor-review.mjs <name> <version> --reviewer <login> --scope <scope>
+  --key-file <path>`: run by the auditor on their own machine. It fetches `dist.integrity`,
+  prints the fields, requires an interactive `yes`, and sends the 0-ALGO self-payment with the
+  ARC-2 note `spm:j{...}`. It prints the txid. `NETWORK` selects TestNet or MainNet.
+- `scripts/record-review.mjs <anchorTxid>`: run by the operator on the server. It reads the
+  anchor from the indexer, checks the sender against `AUDITORS` (`github:<login>=<address>`,
+  in `.env.example`), checks the integrity against npm for that exact version, resolves the
+  repo key (§13.1), prints all fields, requires an interactive `yes`, and writes the row with
+  `anchor_txid` and `review_scope`.
+- Neither tool runs in CI, a fixture or a seed path. With no TTY, both refuse.
+- Repo key parsing: GitHub `owner/repo`, else `npm:<name>`. Remove the maintainer attribution
+  code (`proxy/src/app.ts` `maintainer: null`, the missing packument parser in
+  `attribution-rules.ts`).
+
+Acceptance:
+- Unit tests for the note encode/decode, a wrong sender, an integrity mismatch, no TTY, and
+  these `repository` shapes: a string, an object, `git+https`, `git+ssh`,
+  `github:owner/repo`, GitLab, missing, malformed.
+- `guard.sh` fails when any non-test file other than `record-review.mjs` writes a reviewed
+  status.
+
+Owner: `x402-proxy-engineer`.
+
+### Q7. Ledger and nightly job
+
+Result (SPEC §13.2, ADR 0001, ADR 0005):
+- SQLite schema: `accruals` gets `batch_seq`; new `batches` table; money columns `INTEGER`.
+- One nightly entry point replaces `reconcile-main.ts`: reconcile → `VACUUM INTO` a dated
+  copy and move it to `BACKUP_DIR` (the operator mounts off-host storage there) → credit. The
+  credit step stops with a clear log line when `PAYMENT_ROUTER_APP_ID` is unset or `payTo` is
+  not rekeyed. A failed backup stops the job before the credit.
+- Unmatched inflows are ledgered as `unassigned` ops income and go into
+  `unattributedTotal`.
+- Replace `deploy/systemd/spm-reconcile.*` with `spm-nightly.*`, which runs
+  `docker compose run --rm proxy <nightly command>`.
+
+Acceptance: tests for a backup failure (no credit), an unset app id (no credit, exit 0), a
+batch whose txid is recorded (never re-sent), and batch totals equal to the ledger sums.
+
+Credit call depends on R1. Owner: `x402-proxy-engineer`.
+
+### Q8. Docker Compose deploy
+
+Result (SPEC §10.3): a `proxy/Dockerfile` and a root `compose.yaml` with one service, the
+SQLite file on a named volume, and `.env` from the host. No database container.
+
+Acceptance: `docker compose up` serves `/api/v1/status/ms/2.1.3`; the volume keeps the file
+across a restart.
+
+### Q9. Key separation and env
+
+Result:
+- Deploy and admin scripts read `DEPLOYER_MNEMONIC`. The crediter reads `CREDITER_MNEMONIC`.
+  `SPM_DONOR_MNEMONIC` is client-side only. `optin-usdc.mjs` takes the account as an argument.
+- `PAY_TO_ADDRESS` replaces `SPLIT_APP_ADDRESS` everywhere; the app id is
+  `PAYMENT_ROUTER_APP_ID`.
+- `.env.example` lists `SPM_KEY_VALID_FROM` (default from `proxy/src/config.ts`), `AUDITORS`,
+  `BACKUP_DIR`.
+
+Acceptance: `rg SPM_DONOR_MNEMONIC contracts scripts proxy` shows no server-side use;
+`rg SPLIT_APP_ADDRESS` is empty outside `NOTES.md`.
+
+### Q10. Deploy and check tooling for both networks
+
+Result: `NETWORK` (`testnet` | `mainnet`) selects the asset and algod endpoint for every
+script. A MainNet action refuses without `--confirm-mainnet`. Fix the macOS `sed -i ''` in
+`scripts/deploy-testnet.sh` (rename it if it serves both networks). `check-402.mjs` takes
+`--network`.
+
+Acceptance: `shellcheck` is clean; tests for both networks; the existing MainNet tests of
+`check-402.mjs` pass unchanged.
+
+### Q11. Public texts and donor guide
+
+Result: README, `og:description` and the Bazaar descriptions show both splits (SPEC §6.2)
+and "$0.001 per reviewed package". README gets a donor section (SPEC §11.4): a fresh donor
+account, about 0.3 ALGO plus a few dollars of USDC, the USDC opt-in, a wallet with an in-app
+USDC purchase. README stops saying the store is anything but SQLite and stops stating a
+20,000 cap.
+
+Acceptance: `rg -n '50/20/15/10/5|20% (goes )?to maintainers|20,000|\$0\.02' README.md proxy/src`
+is empty.
+
+### Q12. Guard rules for v6
+
+Result: `guard.sh` fails on any tracked reference to `SplitRouter`, `distribute(` or
+`attest(` in contract code outside `docs/` and `NOTES.md`; a `REAL` money column; a Postgres
+or Drizzle import; a review-row write outside `record-review.mjs` (Q6).
+
+Acceptance: each rule fails on a planted violation and passes when you remove it.
+
+### R1. PaymentRouter replaces SplitRouter
+
+Result (SPEC §10.1, skill `spm-payment-router`): the contract with
+`credit(batchSeq, attributedTotal, unattributedTotal, entries)`, `claim()`, the admin
+identity map, the crediter key setter and `releaseAuthority(to)`. No `attest()`, no
+`setAttestationKey()`. Delete SplitRouter entirely: source, spec, tests, typed client,
+deploy config.
+
+Acceptance: the test vectors in SPEC §17 R0 pass. Tell the user that a human must run
+`algokit project run build`.
+
+Owner: `algorand-contract-engineer`.
+
+### R2. Contract deploy and rekey tooling
+
+Result: deploy PaymentRouter, set the crediter key and the auditor map, then rekey `payTo`.
+The rekey step refuses when `payTo` is not opted into USDC. It works when `payTo` already
+holds USDC.
+
+Acceptance: unit checks for both refusals and the MainNet guard. Depends on R1 and Q10.
+
+### R3. On-chain e2e step
+
+Result: when the app id, `payTo`, the crediter key and a funded donor key are set, the e2e
+step pays, runs the nightly job and claims against the real network. It reports PASS or FAIL,
+never a false PASS. Without them, it SKIPs with its reason. Merge the useful part of
+`demo.sh` into this step, or delete `demo.sh`.
+
+Depends on R1, R2, Q7.
+
+### R4. TestNet rehearsal (before the MainNet rekey)
+
+Result: on TestNet: `payTo` opt-in → one payment through GoPlausible → deploy → rekey →
+nightly job credits batch 1 → `claim()` for the auditor and for ops.
+
+Acceptance: the txid of each step is in `NOTES.md`; R3 PASSes on TestNet.
+
+### D1. Rewrite the operator docs (last)
+
+After the tracks are merged and `verify.sh` passes:
+1. Rewrite `docs/RUNBOOK-mainnet-launch.md` from the new code. It still describes SplitRouter
+   and `distribute()`.
+2. Rewrite `docs/DEPLOY-GUIDE.local.md` (not committed; `.git/info/exclude`). Keep its
+   structure: role table, TestNet phases, MainNet delta, cleanup, gaps. Do not name the
+   production host or domain.
+3. Rewrite `docs/RUNBOOK-contract-build.md` for PaymentRouter: contract name, method list,
+   on-chain checks.
+4. ASD-STE100 style. Every command must exist in the repository. Every step has a "Check:"
+   line.
+5. Remove the WARNING banners from both runbooks.
+
+## Order
+
+- **Wave 1 (parallel worktrees):** H1; Q1; Q5; Q9 + Q10; R1.
+- **Wave 2:** Q2 → Q3; Q4; Q6; Q8; H3.
+- **Wave 3:** Q7; Q11; Q12; R2. H2 when the user is present.
+- **Qualification (human, by Sept 25):** SPEC §17 Q steps 1–6 on MainNet.
+- **Wave 4:** R3 → R4 → MainNet rekey and first credit → D1.
+
+## Human-only items
+
+- P0 donor recruitment (SPEC §17 P0).
+- MainNet provisioning of `payTo` (opt-in only, key cold) and the auditor addresses.
+- Public hosting and the domain.
+- Real package reviews and their anchors.
+- The first real payment; the form and the Electric Capital submission.
+- `algokit project run build` after a contract change.
+- Legal read before any payout to a third party (SPEC §13.4).
+
+## Done
+
+1. `bash scripts/verify.sh` prints `VERIFY: PASS`. Sandbox disabled.
+2. `prek run --all-files` passes.
+3. The user has been told that a human must run `algokit project run build`.
+4. `NOTES.md` and this file are updated (`/handoff`).
+5. The branch is pushed and a PR into `master` is open. Do not merge it.
+6. Report to the user: each item with its commit SHA, the decisions taken, and any gaps.

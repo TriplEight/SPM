@@ -20,8 +20,8 @@ environment variable.
 ```
 scheme: "exact"
 network: ALGORAND_MAINNET_CAIP2
-payTo: SPLIT_APP_ADDRESS            // fixed for the whole competition
-price: "$0.001"                     // USD string; micro-units are on-chain only
+payTo: PAY_TO_ADDRESS               // fixed for the whole competition
+price: "$0.001"                     // USD string, or a DynamicPrice function (lockfile)
 maxTimeoutSeconds: 120
 extra: {
   asset: USDC_MAINNET_ASA_ID,       // WARNING: never omit. A missing asset may resolve to ALGO.
@@ -31,13 +31,19 @@ extra: {
 ```
 CAUTION: the facilitator client method is `getSupported()`, not `supported()`.
 
-Prices: lockfile attest $0.02, single attest $0.001, reviewed tarball $0.001.
-A lockfile with zero reviewed packages is free. Every price is a multiple of
-1,000 microUSDC.
+Price: 1,000 microUSDC per reviewed package on every route (SPEC §11.2, ADR 0008).
+The lockfile route uses a `DynamicPrice` function: 1,000 × reviewed entries, no cap, no
+discount. `@x402-avm/core` 2.6.1 resolves a function price per request, and the Hono
+adapter implements `getBody()`. A lockfile with zero reviewed packages is free.
 
-Gate logic: status below `COMMUNITY_REVIEWED` means passthrough, free. The free tier
-must never require a wallet. Grant it with the `onProtectedRequest` hook, which returns
-`{ grantAccess: true }`. A static route config alone always demands payment.
+Gate logic (SPEC §10.4, ADR 0006):
+- Status below `COMMUNITY_REVIEWED` means passthrough, free, on every route.
+- Reviewed tarball: free unless the request sends `X-SPM-Donate: 1`. npm cannot pay a 402.
+- Attestation routes: standard x402 for reviewed content, so Bazaar agents can pay.
+  `X-SPM-Donate: 0` gets a free partial attestation (pre-middleware).
+
+The free tier must never require a wallet. Grant it with the `onProtectedRequest` hook,
+which returns `{ grantAccess: true }`. A static route config alone always demands payment.
 
 ## Bazaar discovery
 Attach `declareDiscoveryExtension` per route. It always returns its result under the key
@@ -47,6 +53,10 @@ the catalog row never appears. Assert `validateDiscoveryExtension(decl.bazaar).v
 in a unit test.
 
 ## Client (agent / CLI)
+SPM clients send `X-SPM-Donate: 1` with the donation opt-in and `X-SPM-Donate: 0`
+without it. Spend cap: 1,000 microUSDC × the lockfile entries sent (1,000 for one package),
+USDC only.
+
 On 402, decode the requirements and pay with `wrapFetchWithPayment` from
 `@x402-avm/fetch`. The payment is a **plain USDC asset transfer to payTo**. The
 facilitator adds its own fee-payer transaction and submits the group.
@@ -65,8 +75,8 @@ WARNING: there is no direct-submit fallback and no local facilitator. Never add 
 path that submits a payment group with algosdk. The former `proxy/src/settle.ts` did
 that and was an authentication bypass. It is deleted, not repaired.
 
-Revenue is never split per payment. USDC accrues at `payTo`. The contract's
-permissionless `distribute()` fans it out 50/20/15/10/5 later.
+Revenue is never split per payment. USDC accrues at `payTo`. The nightly job credits it
+to PaymentRouter in numbered batches (MVP 40 auditor / 60 ops); payees claim.
 
 Verified in the installed middleware, so add no workaround:
 - A failed settlement discards the handler body.

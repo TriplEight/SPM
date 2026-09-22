@@ -1,5 +1,9 @@
 # Runbook — MainNet launch and qualification
 
+WARNING: this runbook describes SPEC v4 (SplitRouter, `distribute()`, `$0.02` flat lockfile
+price). SPEC v6 replaces that design. Do not follow it on MainNet. `docs/TASK.md` item D1
+rewrites it from the v6 code. Until then, use `SPEC.md` §10, §13, §14 and §17.
+
 **Audience:** the next session, starting after the contract artifacts are
 regenerated, MainNet is provisioned and deployed, and third-party donor
 accounts exist.

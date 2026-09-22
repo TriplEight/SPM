@@ -35,7 +35,7 @@ must reach registry.npmjs.org through the sandbox proxy.
 ## Stack
 - proxy: vitest plus Hono `app.request()`. SQLite in a temp file. External clients
   (GitHub, indexer, facilitator) are injected; tests pass stubs.
-- contracts: vitest on `algorand-typescript-testing`. See `spm-split-contract` for its limits.
+- contracts: vitest on `algorand-typescript-testing`. See `spm-payment-router` for its limits.
 - mcp, cli: vitest.
 
 Redirect test output to a log file. Read the exit code and the last 30 lines.

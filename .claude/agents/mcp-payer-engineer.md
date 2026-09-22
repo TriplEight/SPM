@@ -9,8 +9,10 @@ model: sonnet
 You own `mcp/` and `cli/`. Load the `spm-x402-flow` skill first.
 
 Rules:
-- Donate only through `mcp/src/donor.ts`. It is off by default, and it enforces the 20,000
-  microUSDC cap and the USDC-only asset check. Never build a payment group by hand.
+- Donate only through `mcp/src/donor.ts`. It is off by default. It enforces the spend cap
+  (1,000 microUSDC x the lockfile entries sent; 1,000 for one package) and the USDC-only asset
+  check. Never build a payment group by hand.
+- Send `X-SPM-Donate: 1` with the opt-in and `X-SPM-Donate: 0` without it (SPEC §11.4).
 - The key is `SPM_DONOR_MNEMONIC`. Never write "payer" in names or text.
 - Read the settlement txid from the `PAYMENT-RESPONSE` header with `decodePaymentResponseHeader`.
 - `spm verify` checks DSSE envelopes offline. It never calls the network.
