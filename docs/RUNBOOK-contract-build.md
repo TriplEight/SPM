@@ -1,5 +1,10 @@
 # Runbook — regenerate the SplitRouter artifacts
 
+WARNING: this runbook names SplitRouter and its methods. SPEC v6 replaces SplitRouter with
+PaymentRouter (`docs/TASK.md` R1). The build procedure (`algokit project run build`) stays;
+the contract name, the method list and the on-chain checks change. `docs/TASK.md` item D1
+rewrites this file.
+
 **Status: REQUIRED before any MainNet deploy. Not done.**
 
 Run this on a machine with Docker and the AlgoKit CLI. The session that

@@ -158,3 +158,23 @@ credential reaches the network, so it is a security gate that nothing ran.
 **Expected effect.** A regression in the cli or the action now fails CI. A local
 `pnpm test` and a CI run now check the same set, so a passing local run no
 longer hides a CI failure.
+
+## 2026-09-22 — v6 harness sync and one task file
+
+**What.** Updated the agents `x402-proxy-engineer`, `algorand-contract-engineer`,
+`scope-sentinel` and `mcp-payer-engineer`, and the skills `spm-payment-router`,
+`spm-audit-status`, `spm-x402-flow` and `spm-testing` to SPEC v6. Deleted
+`docs/HANDOFF-next-session.md`. The untracked `docs/TASK-testnet-readiness.local.md`
+became the tracked `docs/TASK.md`. `CLAUDE.md` now points at `docs/TASK.md` and lists
+the correct worktree sync rule (`git merge --ff-only`, not `git reset --hard`).
+Planned in `docs/TASK.md`: prek (H1), Claude Code hooks (H2), removal of five unused
+Algorand skills (H3).
+
+**Why.** Three agents still described SQLite-as-replaced, SplitRouter and
+`distribute()`. `scope-sentinel` cited the wrong spec section. The handoff file
+contradicted v5 (Variant A). The task file was invisible to the other developer
+because `.git/info/exclude` ignored it. `CLAUDE.md` and the task file disagreed on
+how a worktree syncs.
+
+**Expected effect.** A subagent loads a description that matches the spec. There is
+one "what next" document, and every developer sees it.

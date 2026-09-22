@@ -11,3 +11,5 @@ a repeated txid and any `total` above the unallocated balance. This replaces the
 repository now depends on a trusted key, and in return per-repo funds stay on-chain and every
 payee withdraws without a manual payout. Phase 2 replaces the admin-written claimant mapping
 with an oracle-signed identity binding.
+
+Amended by ADR 0005: `credit()` takes numbered batches, not one `settleTxid`.
