@@ -4,10 +4,12 @@ SPM is an npm-compatible registry overlay for the Global x402 Challenge on Algor
 - Unreviewed packages pass through to npm for free.
 - Human-reviewed packages return HTTP 402. A donor pays USDC through the GoPlausible facilitator.
   Clients donate only on opt-in (`--donate`, `allowDonation`, `donate: 'true'`), key `SPM_DONOR_MNEMONIC`.
-- USDC accrues at one fixed `payTo`. `SplitRouter.distribute()` fans it out 50/20/15/10/5.
+- USDC accrues at one fixed `payTo`, rekeyed to `PaymentRouter`. A crediter key credits balances
+  in batches. The auditor and ops claim. Target split 40/10/20/15/10/5; MVP 40 auditor / 60 ops.
 - `POST /v1/attest/lockfile` is the volume route. It returns a signed attestation for a lockfile.
 
-**Spec: `SPEC.md`.** Current state and next steps: `docs/HANDOFF-next-session.md`.
+**Spec: `SPEC.md`.** Terms: `CONTEXT.md`. Decisions: `docs/adr/`.
+Current state and next steps: `docs/HANDOFF-next-session.md`.
 Operator procedures: `docs/RUNBOOK-*.md`. Session log: `NOTES.md`.
 Generic Algorand and AlgoKit guidance: `AGENTS.md` (read only when you need it).
 
@@ -15,16 +17,19 @@ Generic Algorand and AlgoKit guidance: `AGENTS.md` (read only when you need it).
 
 WARNING: every change preserves these. A violation costs money or a false security claim.
 
-1. `payTo` is the leaderboard key. It changes only while it holds no USDC.
-2. Never split per payment. Say "distributes atomically and permissionlessly".
-   Never say "in the same transaction".
+1. `payTo` is the leaderboard key. It never changes after the first USDC arrives.
+   `payTo` opts into USDC before the rekey to `PaymentRouter`. Never reverse this order.
+2. Never split per payment. Never say "in the same transaction".
+   Never call `credit()` permissionless.
 3. `extra = { asset, feePayer, tag: "x402-global-challenge" }` on every paid route.
    `asset` is always explicit. An omitted asset can resolve to ALGO.
 4. Unreviewed never returns 402: tarball, single attest, and zero-coverage lockfile.
 5. A `COMMUNITY_REVIEWED` record means a human read that exact tarball.
    Never create a review record in code, in a shipped fixture, or in a seed script.
 6. The facilitator is mandatory. No local facilitator. No direct chain submission.
-7. Money is integer micro-units. Never use floats.
+7. Money is integer micro-units. Never use floats. Postgres money columns are `BIGINT`.
+8. Public texts show the target split and the MVP split. Never claim a share goes to a role
+   that is not onboarded.
 
 `bash scripts/guard.sh` enforces the invariants that grep can see.
 
@@ -37,8 +42,9 @@ WARNING: every change preserves these. A violation costs money or a false securi
 | USDC ASA | MainNet 31566704. TestNet 10458941 (rehearsal only). 6 decimals. |
 | Facilitator | `https://facilitator.goplausible.xyz`. Client method `getSupported()`, not `supported()`. |
 | Prices (microUSDC) | lockfile 20,000; zero-coverage lockfile free; single attest 1,000; reviewed tarball 1,000 |
-| Split per 1,000 | 500 / 200 / 150 / 100 / 50 |
-| `distribute()` floor | `MIN_DISTRIBUTE` 100,000 microUSDC; outer fee at least 6,000 microALGO |
+| Split per 1,000 | Target 400 / 100 / 200 / 150 / 100 / 50. MVP: auditor 400, ops 600 |
+| `claim()` floor | `MIN_CLAIM` 100,000 microUSDC; outer fee at least 2,000 microALGO |
+| Store | PostgreSQL 16 + Drizzle. Docker Compose in dev and prod. No SQLite. |
 | Attestations | DSSE + in-toto Statement v1, ed25519, unfunded service key. Never `algosdk.signBytes`. |
 | Single attest | `GET /v1/attest?name=@babel/core&version=7.25.2` (query params; scoped names contain `/`) |
 
@@ -49,15 +55,15 @@ The attribution tag applies at settlement and is not retroactive.
 
 | Path | Content | Subagent |
 |---|---|---|
-| `contracts/` | `SplitRouter` (Puya-TS) | `algorand-contract-engineer` |
-| `proxy/` | Hono overlay, x402 routes, DSSE, SQLite status store, claims ledger | `x402-proxy-engineer` |
+| `contracts/` | `PaymentRouter` (Puya-TS) | `algorand-contract-engineer` |
+| `proxy/` | Hono overlay, x402 routes, DSSE, Postgres status store, ledger, crediter | `x402-proxy-engineer` |
 | `mcp/`, `cli/` | MCP server and `spm` CLI: `install`, `attest` (opt-in `--donate`), offline `verify` | `mcp-payer-engineer` |
 | `.github/actions/spm-attest/` | CI Action; runs `spm attest`. Fails open. Never reddens a user's CI. | — |
 | `scripts/` | `verify.sh`, `guard.sh`, `e2e.mjs`, `payout.ts`. Reconcile: `pnpm -C proxy reconcile` | `integration-tester` |
 
-Skills: `spm-x402-flow`, `spm-audit-status`, `spm-split-contract`, `spm-testing`.
+Skills: `spm-x402-flow`, `spm-audit-status`, `spm-payment-router`, `spm-testing`.
 Algorand reference skills: `algorand-core`, `algorand-typescript`, `algorand-x402-typescript`.
-Scope questions go to `scope-sentinel`. The out-of-scope list is `SPEC.md` §10.
+Scope questions go to `scope-sentinel`. The out-of-scope list is `SPEC.md` §15.
 
 ## Commands
 

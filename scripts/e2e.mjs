@@ -91,7 +91,7 @@ async function main() {
     if (res.status !== 402) throw new Error(`expected 402, got ${res.status}`)
 
     // The 402 JSON body is always `{}` — requirements travel in the
-    // PAYMENT-REQUIRED header (base64), never in the body (SPEC.md §4.3).
+    // PAYMENT-REQUIRED header (base64), never in the body (SPEC.md §11.3).
     const body = await res.json()
     if (Object.keys(body).length !== 0) {
       throw new Error(`402 body must be {}, got ${JSON.stringify(body)}`)
@@ -271,7 +271,7 @@ async function main() {
       // The payment leg is a plain USDC transfer to payTo — distribute() is
       // a separate, later, permissionless call. Asserting inner transfers
       // on THIS transaction would test an architecture SPM no longer runs
-      // (SPEC.md §3.1).
+      // (SPEC.md §10.1).
       const info = await algod.pendingTransactionInformation(result.txid).do()
       const innerTxns = info.innerTxns ?? info['inner-txns'] ?? []
       if (innerTxns.length !== 0) {

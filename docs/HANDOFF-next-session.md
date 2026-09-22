@@ -16,7 +16,7 @@ Built this session:
   the old §3 human-only item about that file.
 - `scripts/check-402.mjs`, the step 3 attribution check. It exits 0 only if
   tag, asset, network, and feePayer all PASS.
-- `scripts/hit-rate.mjs`, the SPEC.md §4.2 seed-list median measurement for
+- `scripts/hit-rate.mjs`, the SPEC.md §11.2 seed-list median measurement for
   step 4.
 - `deploy/systemd/spm-reconcile.{service,timer}` for step 6. A human installs
   them.
@@ -66,7 +66,7 @@ worktree agents from `master`, not from this branch.
    `integrity` resolves to `UNREVIEWED` — enforced, not advisory. Target 15
    to 30 small, ubiquitous packages. Before reviewing, run the candidate
    list against 20 real package-lock.json files and record the median
-   reviewed count in `NOTES.md` (SPEC.md §4.2). If it lands below 5, fix the
+   reviewed count in `NOTES.md` (SPEC.md §11.2). If it lands below 5, fix the
    seed list, not the price.
    ```bash
    node scripts/hit-rate.mjs candidates.txt <lockfiles-dir>
@@ -102,7 +102,7 @@ worktree agents from `master`, not from this branch.
 - **Legal.** SPM will hold funds owed to third parties. For a German
   operator that may touch payment-services regulation. Get advice before
   paying anyone outside the team.
-- **Post-MVP TODO (SPEC.md §14).** Publish the CLI to npm. Make the
+- **Post-MVP TODO (SPEC.md §20).** Publish the CLI to npm. Make the
   donation spend cap configurable.
 
 ---
