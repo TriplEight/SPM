@@ -212,24 +212,11 @@ async function main() {
     if (data.status !== 'UNREVIEWED') throw new Error(`got ${data.status}`)
   })
 
-  // ── 7. Claims ledger: earnings + claim registration are free, reachable ──
+  // ── 7. Earnings ledger: free, reachable ───────────────────────────────────
   await check('earnings route: free, reachable', async () => {
     const res = await fetch(`${PROXY_URL}/api/v1/earnings/github/octocat`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     if (res.headers.get('PAYMENT-REQUIRED')) throw new Error('earnings must never be gated')
-  })
-
-  await check('claims route: free, reachable, returns a nonce', async () => {
-    const claimant = algosdk.generateAccount().addr.toString()
-    const res = await fetch(`${PROXY_URL}/api/v1/claims`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ identity: 'github:e2e-octocat', algorandAddress: claimant }),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    if (res.headers.get('PAYMENT-REQUIRED')) throw new Error('claims must never be gated')
-    const data = await res.json()
-    if (!data.nonce) throw new Error('no nonce returned')
   })
 
   // ── 8. On-chain: paid install and the permissionless distribute() split ──
