@@ -1,44 +1,64 @@
 ---
 name: spm-audit-status
 description: >
-  SPM audit-status model: the tier subset, the auto-reset rule, the SQLite
-  schema, and the machine-readable status API. Use for the status store and
-  the /api/v1/status endpoint.
+  SPM audit-status model: the MVP tiers, the auto-reset rule, the integrity rule, the
+  Postgres schema (Drizzle), and the machine-readable status API. Use for the status
+  store and the /api/v1/status endpoint.
 ---
 # Audit status
 
-## Tiers (MVP subset only)
-UNREVIEWED       default on publish        FREE
-AUTO_SCANNED     passed automated checks   FREE
-COMMUNITY_REVIEWED  >=1 signed review      PAID (triggers x402)
-PEER_REVIEWED    >=2 independent reviews   PAID
-`MISSION_CRITICAL_SAFE` and `CVE_KNOWN` are out of scope. Do not add them.
+Spec: `SPEC.md` §4 (model), §12.4 (integrity), §13.1 (repo key), §14 (seeding).
+Terms: `CONTEXT.md` (Tier, Flag, COMMUNITY_REVIEWED).
 
-Payment triggers for COMMUNITY_REVIEWED and above. Everything below is free.
+## Tiers (MVP builds two)
+UNREVIEWED          default on publish                         FREE
+COMMUNITY_REVIEWED  >=1 auditor read that exact tarball, signed PAID (triggers x402)
+
+`AUTO_SCANNED` (Phase 2), `PEER_REVIEWED` and `MISSION_CRITICAL_SAFE` (Phase 3) are the
+product model. Do not build them in the MVP. CVEs are flags (`cve:<id>`), never a tier.
+Flags are Phase 2.
+
+Payment triggers for COMMUNITY_REVIEWED and above. Everything below is free (invariant 4).
 
 ## Auto-reset rule
-A new package version starts at UNREVIEWED and must be re-reviewed. When the proxy
-sees a version it hasn't recorded, default it to UNREVIEWED. This is a demo beat:
+A new package version starts at UNREVIEWED and must be re-reviewed. The store keys on
+(pkg, version), so a version with no row is UNREVIEWED. This is the demo beat:
 "the version bump is exactly where supply-chain attacks inject."
+
+## Integrity rule
+A paid-tier row with no stored `integrity` is an incomplete review. It resolves to
+UNREVIEWED. Without this rule a signed statement would report `integrityMatch: true`
+having compared nothing.
 
 ## Lifecycle (how a row gets its status)
 1. Unknown version -> synthesize UNREVIEWED (free). Never store-then-block; just default.
-2. A human reviews that exact tarball. The auditor calls
-   SplitRouter.attest(pkg, ver, status, integrity) on-chain (box = source of truth).
-3. Proxy mirrors that into this SQLite row: status=COMMUNITY_REVIEWED, auditor_addr,
-   attest_txid. SQLite is the hot-path read; the box is canonical.
-   WARNING: never write a review row without a human review (CLAUDE.md invariant 5).
-4. Install reads SQLite. >= COMMUNITY_REVIEWED -> 402. Else passthrough (free).
-5. Version bump -> no row -> UNREVIEWED again. SPEC.md §7 has the seeding rules.
+2. A human auditor reviews that exact tarball.
+3. The operator runs `record-review` (TASK item 5). It fetches `dist.integrity` and the repo
+   key from npm, asks for an interactive `yes`, writes the row, and calls
+   PaymentRouter.attest(pkg, ver, status, integrity) signed by the auditor key.
+   WARNING: only this tool writes a review row. Never in code, a fixture, or a seed
+   script (CLAUDE.md invariant 5).
+4. Install and attest routes read Postgres. >= COMMUNITY_REVIEWED with integrity -> 402.
+   Else free.
+5. Version bump -> no row -> UNREVIEWED again.
 
-## Storage (SQLite — no Postgres/Redis)
-CREATE TABLE audit_status (
-  pkg TEXT, version TEXT, status TEXT,
-  auditor_addr TEXT, attest_txid TEXT, ts INTEGER,
+## Storage (PostgreSQL 16, Drizzle; replaces SQLite — TASK item 2)
+audit_status (
+  pkg          TEXT NOT NULL,
+  version      TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'UNREVIEWED',
+  integrity    TEXT,          -- npm dist.integrity (sha512); null => resolves UNREVIEWED
+  reviewer     TEXT,          -- bare GitHub login ("alice"), never "github:alice"
+  repo         TEXT,          -- GitHub owner/repo, else npm:<name> (SPEC §13.1)
+  review_scope TEXT,          -- e.g. full-source+install-scripts (SPEC §14)
+  auditor_addr TEXT,
+  attest_txid  TEXT,
+  ts           BIGINT,        -- same unit as today's ts
   PRIMARY KEY (pkg, version)
-);
+)
 
 ## API
 GET /api/v1/status/:pkg/:version
--> 200 { pkg, version, status, auditor_addr, attest_txid, ts }
+GET /api/v1/status/@scope/:pkg/:version   (scoped names; separate route)
+-> 200 { pkg, version, status, integrity, reviewer, auditor_addr, attest_txid, ts }
 -> unknown version => synthesize { status: "UNREVIEWED" } per the auto-reset rule.
