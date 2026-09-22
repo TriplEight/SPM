@@ -329,7 +329,31 @@ After the tracks are merged and `verify.sh` passes:
 - `algokit project run build` after a contract change.
 - Legal read before any payout to a third party (SPEC §13.4).
 
-## Done
+## Definition of done
+
+### Per work item
+
+The orchestrator accepts an item only when all of these are true. Check each one with a
+tool call on raw output, never on a subagent report or on `rtk`-filtered output.
+
+1. Each acceptance check of the item passes when the orchestrator runs it.
+2. Each new behavior and each handled error path has a test.
+3. At least one new test fails when the orchestrator reverts the item's main code change.
+   Restore the change after the check.
+4. `pnpm typecheck`, `pnpm exec biome ci .` and `bash scripts/guard.sh` pass with zero
+   warnings (`prek run --all-files` after H1).
+5. `git diff --stat` shows only files that the item owns, plus tests and docs it names.
+6. No assertion was weakened, skipped or deleted to make a check pass.
+7. The eight invariants in `CLAUDE.md` hold. No code, fixture or seed creates a review record.
+8. The item is one commit: imperative subject, 72 characters or fewer, no AI attribution.
+9. If the code clarified the spec, the matching `SPEC.md` section or ADR is updated in the
+   same commit.
+10. The item heading in this file ends with `— DONE <short-sha>`.
+
+An item that fails a check goes to a fix subagent with the raw error output. After two failed
+fix attempts, stop that item. Report the item, both attempts and the log paths to the user.
+
+### Per session
 
 1. `bash scripts/verify.sh` prints `VERIFY: PASS`. Sandbox disabled.
 2. `prek run --all-files` passes.
@@ -337,3 +361,6 @@ After the tracks are merged and `verify.sh` passes:
 4. `NOTES.md` and this file are updated (`/handoff`).
 5. The branch is pushed and a PR into `master` is open. Do not merge it.
 6. Report to the user: each item with its commit SHA, the decisions taken, and any gaps.
+
+A session can end before all items are done. It is still done when items 1, 2, 4 and 6 are
+true for the merged items, and the report lists the open items with their blocker.

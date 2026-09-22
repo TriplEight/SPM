@@ -178,3 +178,16 @@ how a worktree syncs.
 
 **Expected effect.** A subagent loads a description that matches the spec. There is
 one "what next" document, and every developer sees it.
+
+## 2026-09-22 — `/next` command and definition of done
+
+**What.** Added `.claude/commands/next.md`. It holds the session protocol: scope, index-level
+read, plan approval gate, one Sonnet subagent per item, acceptance against the definition of
+done. `docs/TASK.md` § Done became § Definition of done, with per-item and per-session lists
+and the two-fix-attempts escalation rule. Accepted items get `— DONE <sha>` on the heading.
+
+**Why.** The user pasted a long orchestration prompt at the start of each session. Most of it
+duplicated `CLAUDE.md`. The rest (plan gate, fix limit, per-item done criteria) lived nowhere.
+
+**Expected effect.** A session starts with `/next` or `/next Q1 Q5`. Item status survives
+across sessions in `docs/TASK.md`, so no item is done twice.
