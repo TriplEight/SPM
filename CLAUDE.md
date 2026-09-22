@@ -82,7 +82,12 @@ pnpm typecheck
 pnpm -C proxy test      # also contracts, mcp, cli
 bash scripts/verify.sh  # all checks; prints VERIFY: PASS
 pnpm exec biome ci .    # zero warnings
+prek run --all-files    # the pre-commit and pre-push hooks; CI runs this too
 ```
+
+One-time setup, after `.githooks/` is merged away: `git config --unset core.hooksPath &&
+prek install --hook-type pre-commit --hook-type pre-push`. This switches the repo's git
+hooks from the old `.githooks` path to prek.
 
 CAUTION: run proxy tests and `verify.sh` with the Bash sandbox disabled.
 The sandbox blocks the unix sockets that the subprocess tests use.
