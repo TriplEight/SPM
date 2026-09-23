@@ -210,7 +210,7 @@ batch whose txid is recorded (never re-sent), and batch totals equal to the ledg
 
 Credit call depends on R1. Owner: `x402-proxy-engineer`.
 
-### Q8. Docker Compose deploy
+### Q8. Docker Compose deploy — DONE 5e52f93
 
 Result (SPEC §10.3): a `proxy/Dockerfile` and a root `compose.yaml` with one service, the
 SQLite file on a named volume, and `.env` from the host. No database container.
