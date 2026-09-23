@@ -218,7 +218,7 @@ SQLite file on a named volume, and `.env` from the host. No database container.
 Acceptance: `docker compose up` serves `/api/v1/status/ms/2.1.3`; the volume keeps the file
 across a restart.
 
-### Q9. Key separation and env
+### Q9. Key separation and env — DONE efdf4aa
 
 Result:
 - Deploy and admin scripts read `DEPLOYER_MNEMONIC`. The crediter reads `CREDITER_MNEMONIC`.
@@ -231,7 +231,7 @@ Result:
 Acceptance: `rg SPM_DONOR_MNEMONIC contracts scripts proxy` shows no server-side use;
 `rg SPLIT_APP_ADDRESS` is empty outside `NOTES.md`.
 
-### Q10. Deploy and check tooling for both networks
+### Q10. Deploy and check tooling for both networks — DONE efdf4aa
 
 Result: `NETWORK` (`testnet` | `mainnet`) selects the asset and algod endpoint for every
 script. A MainNet action refuses without `--confirm-mainnet`. Fix the macOS `sed -i ''` in
