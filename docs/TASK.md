@@ -192,7 +192,7 @@ Acceptance:
 
 Owner: `x402-proxy-engineer`.
 
-### Q7. Ledger and nightly job
+### Q7. Ledger and nightly job — DONE 7fc8082
 
 Result (SPEC §13.2, ADR 0001, ADR 0005):
 - SQLite schema: `accruals` gets `batch_seq`; new `batches` table; money columns `INTEGER`.
