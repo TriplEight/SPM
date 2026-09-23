@@ -192,7 +192,7 @@ Acceptance:
 
 Owner: `x402-proxy-engineer`.
 
-### Q7. Ledger and nightly job
+### Q7. Ledger and nightly job — DONE 7fc8082
 
 Result (SPEC §13.2, ADR 0001, ADR 0005):
 - SQLite schema: `accruals` gets `batch_seq`; new `batches` table; money columns `INTEGER`.
@@ -241,7 +241,7 @@ script. A MainNet action refuses without `--confirm-mainnet`. Fix the macOS `sed
 Acceptance: `shellcheck` is clean; tests for both networks; the existing MainNet tests of
 `check-402.mjs` pass unchanged.
 
-### Q11. Public texts and donor guide
+### Q11. Public texts and donor guide — DONE c5a173d
 
 Result: README, `og:description` and the Bazaar descriptions show both splits (SPEC §6.2)
 and "$0.001 per reviewed package". README gets a donor section (SPEC §11.4): a fresh donor
@@ -252,7 +252,7 @@ USDC purchase. README stops saying the store is anything but SQLite and stops st
 Acceptance: `rg -n '50/20/15/10/5|20% (goes )?to maintainers|20,000|\$0\.02' README.md proxy/src`
 is empty.
 
-### Q12. Guard rules for v6
+### Q12. Guard rules for v6 — DONE d893834
 
 Result: `guard.sh` fails on any tracked reference to `SplitRouter`, `distribute(` or
 `attest(` in contract code outside `docs/` and `NOTES.md`; a `REAL` money column; a Postgres
@@ -273,7 +273,7 @@ Acceptance: the test vectors in SPEC §17 R0 pass. Tell the user that a human mu
 
 Owner: `algorand-contract-engineer`.
 
-### R2. Contract deploy and rekey tooling
+### R2. Contract deploy and rekey tooling — DONE 012cf58
 
 Result: deploy PaymentRouter, set the crediter key and the auditor map, then rekey `payTo`.
 The rekey step refuses when `payTo` is not opted into USDC. It works when `payTo` already
