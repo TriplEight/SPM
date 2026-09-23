@@ -140,7 +140,7 @@ stays true.
 
 Depends on Q2. Owner: `x402-proxy-engineer`.
 
-### Q4. Clients: opt-in header and spend cap
+### Q4. Clients: opt-in header and spend cap — DONE cafba88
 
 Result (SPEC §11.4):
 - CLI, MCP and Action send `X-SPM-Donate: 1` with the opt-in and `X-SPM-Donate: 0` without it.
