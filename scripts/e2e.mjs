@@ -16,6 +16,7 @@ import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
+import { assertSqliteWriteAllowed } from './e2e-guard.mjs'
 
 // Anchors a CJS `require()` at each workspace package's own node_modules —
 // scripts/ has no node_modules of its own. Mirrors the pattern already
@@ -91,10 +92,18 @@ async function main() {
   // ── 2. Paid gate: seed a COMMUNITY_REVIEWED tarball ───────────────────────
   const PAID_PKG = 'express'
   const PAID_VER = '4.21.2'
-  // setStatus() writes through the real status store (better-sqlite3, the
-  // same SQLITE_PATH the proxy process has open) — no external `sqlite3`
-  // binary dependency, and no hand-written SQL to drift from the schema.
-  setStatus(PAID_PKG, PAID_VER, 'COMMUNITY_REVIEWED', 'E2E_AUDITOR', 'E2E_TXID')
+  // The call below writes through the real status store (better-sqlite3,
+  // the same SQLITE_PATH the proxy process has open) — no external
+  // `sqlite3` binary dependency, and no hand-written SQL to drift from the
+  // schema.
+  //
+  // Refuses first unless SQLITE_PATH resolves inside a throwaway directory
+  // (os.tmpdir()): this script runs manually, on any machine, and a real
+  // deployment's database (the Docker Compose path is /data/audit.db) must
+  // never receive a fake review row (CLAUDE.md invariant 5). NETWORK alone
+  // does not cover this — the first deploy is TestNet, not MainNet.
+  assertSqliteWriteAllowed(process.env.SQLITE_PATH)
+  setStatus(PAID_PKG, PAID_VER, 'COMMUNITY_REVIEWED', 'E2E_AUDITOR', 'E2E_TXID') // guard-allow: RULE9 — e2e.mjs's own throwaway-SQLITE_PATH fixture write, gated by assertSqliteWriteAllowed() above
 
   // A reviewed tarball is free by default (ADR 0006) — it returns 402 only
   // when the request opts in with X-SPM-Donate: 1.
@@ -211,7 +220,7 @@ async function main() {
       'version',
       'status',
       'auditor_addr',
-      'attest_txid',
+      'anchor_txid',
       'ts',
       'integrity',
     ]) {

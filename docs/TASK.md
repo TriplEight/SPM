@@ -109,7 +109,7 @@ reviewed, `X-SPM-Donate: 1` → 402; unreviewed, `X-SPM-Donate: 1` → 200.
 
 Owner: `x402-proxy-engineer`.
 
-### Q2. Attestation routes: partial attestation and statement changes
+### Q2. Attestation routes: partial attestation and statement changes — DONE 90a2f73
 
 Result (SPEC §11.2, §12.3):
 - `X-SPM-Donate: 0` on `/v1/attest` or `/v1/attest/lockfile` returns a free partial
@@ -126,7 +126,7 @@ attestation.
 
 Owner: `x402-proxy-engineer`.
 
-### Q3. Lockfile price per reviewed package
+### Q3. Lockfile price per reviewed package — DONE bda3a0d
 
 Result (SPEC §11.2, ADR 0008): the lockfile route price is a `DynamicPrice` function of
 1,000 µUSDC × N, where N counts reviewed entries whose integrity matches. N comes from the
@@ -140,7 +140,7 @@ stays true.
 
 Depends on Q2. Owner: `x402-proxy-engineer`.
 
-### Q4. Clients: opt-in header and spend cap
+### Q4. Clients: opt-in header and spend cap — DONE cafba88
 
 Result (SPEC §11.4):
 - CLI, MCP and Action send `X-SPM-Donate: 1` with the opt-in and `X-SPM-Donate: 0` without it.
@@ -166,7 +166,7 @@ empty; tests pass.
 
 Owner: `x402-proxy-engineer`.
 
-### Q6. Review anchor and `record-review`
+### Q6. Review anchor and `record-review` — DONE 5ca4fe7
 
 Result (SPEC §14, ADR 0007):
 - `scripts/anchor-review.mjs <name> <version> --reviewer <login> --scope <scope>
@@ -210,7 +210,7 @@ batch whose txid is recorded (never re-sent), and batch totals equal to the ledg
 
 Credit call depends on R1. Owner: `x402-proxy-engineer`.
 
-### Q8. Docker Compose deploy
+### Q8. Docker Compose deploy — DONE 5e52f93
 
 Result (SPEC §10.3): a `proxy/Dockerfile` and a root `compose.yaml` with one service, the
 SQLite file on a named volume, and `.env` from the host. No database container.
