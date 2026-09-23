@@ -273,7 +273,7 @@ Acceptance: the test vectors in SPEC §17 R0 pass. Tell the user that a human mu
 
 Owner: `algorand-contract-engineer`.
 
-### R2. Contract deploy and rekey tooling
+### R2. Contract deploy and rekey tooling — DONE 012cf58
 
 Result: deploy PaymentRouter, set the crediter key and the auditor map, then rekey `payTo`.
 The rekey step refuses when `payTo` is not opted into USDC. It works when `payTo` already
