@@ -51,7 +51,7 @@ with a note transaction; 1,000 µUSDC per reviewed package with no discount.
 Each item states the result and the acceptance checks. Put the acceptance checks in the
 subagent prompt. Run them again yourself before you accept an item.
 
-### H1. prek replaces `.githooks` (first)
+### H1. prek replaces `.githooks` (first) — DONE 87c9ef0
 
 Result:
 - A prek config at the repo root. On `pre-commit`: `bash scripts/guard.sh`,
@@ -98,7 +98,7 @@ write-protects `.claude/skills`; use `trash` with the user's approval.
 Acceptance: `rg -n 'algorand-python|x402-python|algokit-utils-py|algorand-frontend|algorand-ecosystem'
 AGENTS.md CLAUDE.md .claude` is empty.
 
-### Q1. Tarball: 402 only with donation opt-in
+### Q1. Tarball: 402 only with donation opt-in — DONE ac1f1e1
 
 Result (SPEC §10.4, ADR 0006): the `onProtectedRequest` hook grants access to an unreviewed
 tarball, and to a reviewed tarball unless the request sends `X-SPM-Donate: 1`. Every tarball
@@ -155,7 +155,7 @@ reviewed entries is paid.
 
 Owner: `mcp-payer-engineer`.
 
-### Q5. Delete claim registration, GitHub proofs, `seed.ts`, `payout.ts`
+### Q5. Delete claim registration, GitHub proofs, `seed.ts`, `payout.ts` — DONE e6ef9c3
 
 Result: delete `POST /api/v1/claims`, `proxy/src/claims/github.ts`, the `claims` table,
 `proxy/src/seed.ts` and `scripts/payout.ts`, and every reference to them (`package.json`,
@@ -260,7 +260,7 @@ or Drizzle import; a review-row write outside `record-review.mjs` (Q6).
 
 Acceptance: each rule fails on a planted violation and passes when you remove it.
 
-### R1. PaymentRouter replaces SplitRouter
+### R1. PaymentRouter replaces SplitRouter — DONE 60d1b90
 
 Result (SPEC §10.1, skill `spm-payment-router`): the contract with
 `credit(batchSeq, attributedTotal, unattributedTotal, entries)`, `claim()`, the admin
