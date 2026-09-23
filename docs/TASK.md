@@ -252,7 +252,7 @@ USDC purchase. README stops saying the store is anything but SQLite and stops st
 Acceptance: `rg -n '50/20/15/10/5|20% (goes )?to maintainers|20,000|\$0\.02' README.md proxy/src`
 is empty.
 
-### Q12. Guard rules for v6
+### Q12. Guard rules for v6 — DONE d893834
 
 Result: `guard.sh` fails on any tracked reference to `SplitRouter`, `distribute(` or
 `attest(` in contract code outside `docs/` and `NOTES.md`; a `REAL` money column; a Postgres
