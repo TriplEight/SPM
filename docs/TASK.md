@@ -281,7 +281,7 @@ holds USDC.
 
 Acceptance: unit checks for both refusals and the MainNet guard. Depends on R1 and Q10.
 
-### R3. On-chain e2e step
+### R3. On-chain e2e step — DONE 8b948ca
 
 Result: when the app id, `payTo`, the crediter key and a funded donor key are set, the e2e
 step pays, runs the nightly job and claims against the real network. It reports PASS or FAIL,
@@ -292,8 +292,11 @@ Depends on R1, R2, Q7.
 
 ### R4. TestNet rehearsal (before the MainNet rekey)
 
-Result: on TestNet: `payTo` opt-in → one payment through GoPlausible → deploy → rekey →
-nightly job credits batch 1 → `claim()` for the auditor and for ops.
+Result: on TestNet: `payTo` opt-in → one lockfile payment through GoPlausible with 250
+reviewed entries (250,000 µUSDC) → deploy → rekey → nightly job credits batch 1 → `claim()` for
+the auditor and for ops. One tarball payment credits only 400 / 600, which is below `MIN_CLAIM`
+(100,000). The contract stays unchanged. The 250 entries share one repo and one reviewer
+identity, so batch 1 has one auditor entry. R3 runs this sequence (`scripts/demo.sh`).
 
 Acceptance: the txid of each step is in `NOTES.md`; R3 PASSes on TestNet.
 
