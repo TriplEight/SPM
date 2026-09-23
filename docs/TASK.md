@@ -109,7 +109,7 @@ reviewed, `X-SPM-Donate: 1` → 402; unreviewed, `X-SPM-Donate: 1` → 200.
 
 Owner: `x402-proxy-engineer`.
 
-### Q2. Attestation routes: partial attestation and statement changes
+### Q2. Attestation routes: partial attestation and statement changes — DONE 90a2f73
 
 Result (SPEC §11.2, §12.3):
 - `X-SPM-Donate: 0` on `/v1/attest` or `/v1/attest/lockfile` returns a free partial
