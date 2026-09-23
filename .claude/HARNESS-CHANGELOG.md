@@ -178,3 +178,34 @@ how a worktree syncs.
 
 **Expected effect.** A subagent loads a description that matches the spec. There is
 one "what next" document, and every developer sees it.
+
+## 2026-09-22 — `/next` command and definition of done
+
+**What.** Added `.claude/commands/next.md`. It holds the session protocol: scope, index-level
+read, plan approval gate, one Sonnet subagent per item, acceptance against the definition of
+done. `docs/TASK.md` § Done became § Definition of done, with per-item and per-session lists
+and the two-fix-attempts escalation rule. Accepted items get `— DONE <sha>` on the heading.
+
+**Why.** The user pasted a long orchestration prompt at the start of each session. Most of it
+duplicated `CLAUDE.md`. The rest (plan gate, fix limit, per-item done criteria) lived nowhere.
+
+**Expected effect.** A session starts with `/next` or `/next Q1 Q5`. Item status survives
+across sessions in `docs/TASK.md`, so no item is done twice.
+
+## 2026-09-22 — Claude Code hooks (H2) and unused skills removed (H3)
+
+**What.** `.claude/settings.json` registers two hooks. `PreToolUse` on `Bash` runs
+`.claude/hooks/bash-guard.sh`. It blocks a command that can print a `*_MNEMONIC` value
+(a `$X_MNEMONIC` expansion, `printenv` or `env` with `MNEMONIC`, a `.env` read with
+`MNEMONIC`), and a `git push` to `master` or `main` or while on `master`. `PostToolUse` on
+`Edit|Write` runs `.claude/hooks/biome-format.sh`: `biome check --write` on JS, TS, JSON and
+CSS files. It exits 2 with the Biome errors when a lint error remains. There is no `Stop`
+hook. H3 removed the Python, frontend and ecosystem skills and their references.
+
+**Why.** The mnemonic and push rules lived only in prose. Biome errors surfaced only at commit.
+SPM uses TypeScript only, so the removed skills were noise in the skill list.
+
+**Expected effect.** An agent cannot print a mnemonic or push to `master` by mistake. Edited
+files arrive formatted. The guard matches text, not shell syntax: a command whose text contains
+`git push origin master` or a `MNEMONIC` variable expansion is blocked, also inside quotes or a
+heredoc. That is on purpose. Write such text with the Edit tool.

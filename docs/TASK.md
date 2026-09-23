@@ -51,7 +51,7 @@ with a note transaction; 1,000 µUSDC per reviewed package with no discount.
 Each item states the result and the acceptance checks. Put the acceptance checks in the
 subagent prompt. Run them again yourself before you accept an item.
 
-### H1. prek replaces `.githooks` (first)
+### H1. prek replaces `.githooks` (first) — DONE 87c9ef0
 
 Result:
 - A prek config at the repo root. On `pre-commit`: `bash scripts/guard.sh`,
@@ -70,7 +70,7 @@ Acceptance:
   secret scan.
 - `prek run --all-files` passes on a clean tree. CI is green.
 
-### H2. Claude Code hooks
+### H2. Claude Code hooks — DONE ff2553b
 
 Approved by the user on 2026-09-22. The edit still needs the permission prompt.
 
@@ -87,7 +87,7 @@ Result:
 Acceptance: each hook fires once in a manual test. Log the change in
 `.claude/HARNESS-CHANGELOG.md`.
 
-### H3. Remove unused skills
+### H3. Remove unused skills — DONE 1c0b701
 
 Approved by the user on 2026-09-22. The deletion still needs the permission prompt.
 
@@ -98,7 +98,7 @@ write-protects `.claude/skills`; use `trash` with the user's approval.
 Acceptance: `rg -n 'algorand-python|x402-python|algokit-utils-py|algorand-frontend|algorand-ecosystem'
 AGENTS.md CLAUDE.md .claude` is empty.
 
-### Q1. Tarball: 402 only with donation opt-in
+### Q1. Tarball: 402 only with donation opt-in — DONE ac1f1e1
 
 Result (SPEC §10.4, ADR 0006): the `onProtectedRequest` hook grants access to an unreviewed
 tarball, and to a reviewed tarball unless the request sends `X-SPM-Donate: 1`. Every tarball
@@ -155,7 +155,7 @@ reviewed entries is paid.
 
 Owner: `mcp-payer-engineer`.
 
-### Q5. Delete claim registration, GitHub proofs, `seed.ts`, `payout.ts`
+### Q5. Delete claim registration, GitHub proofs, `seed.ts`, `payout.ts` — DONE e6ef9c3
 
 Result: delete `POST /api/v1/claims`, `proxy/src/claims/github.ts`, the `claims` table,
 `proxy/src/seed.ts` and `scripts/payout.ts`, and every reference to them (`package.json`,
@@ -218,7 +218,7 @@ SQLite file on a named volume, and `.env` from the host. No database container.
 Acceptance: `docker compose up` serves `/api/v1/status/ms/2.1.3`; the volume keeps the file
 across a restart.
 
-### Q9. Key separation and env
+### Q9. Key separation and env — DONE efdf4aa
 
 Result:
 - Deploy and admin scripts read `DEPLOYER_MNEMONIC`. The crediter reads `CREDITER_MNEMONIC`.
@@ -231,7 +231,7 @@ Result:
 Acceptance: `rg SPM_DONOR_MNEMONIC contracts scripts proxy` shows no server-side use;
 `rg SPLIT_APP_ADDRESS` is empty outside `NOTES.md`.
 
-### Q10. Deploy and check tooling for both networks
+### Q10. Deploy and check tooling for both networks — DONE efdf4aa
 
 Result: `NETWORK` (`testnet` | `mainnet`) selects the asset and algod endpoint for every
 script. A MainNet action refuses without `--confirm-mainnet`. Fix the macOS `sed -i ''` in
@@ -260,7 +260,7 @@ or Drizzle import; a review-row write outside `record-review.mjs` (Q6).
 
 Acceptance: each rule fails on a planted violation and passes when you remove it.
 
-### R1. PaymentRouter replaces SplitRouter
+### R1. PaymentRouter replaces SplitRouter — DONE 60d1b90
 
 Result (SPEC §10.1, skill `spm-payment-router`): the contract with
 `credit(batchSeq, attributedTotal, unattributedTotal, entries)`, `claim()`, the admin
@@ -329,7 +329,31 @@ After the tracks are merged and `verify.sh` passes:
 - `algokit project run build` after a contract change.
 - Legal read before any payout to a third party (SPEC §13.4).
 
-## Done
+## Definition of done
+
+### Per work item
+
+The orchestrator accepts an item only when all of these are true. Check each one with a
+tool call on raw output, never on a subagent report or on `rtk`-filtered output.
+
+1. Each acceptance check of the item passes when the orchestrator runs it.
+2. Each new behavior and each handled error path has a test.
+3. At least one new test fails when the orchestrator reverts the item's main code change.
+   Restore the change after the check.
+4. `pnpm typecheck`, `pnpm exec biome ci .` and `bash scripts/guard.sh` pass with zero
+   warnings (`prek run --all-files` after H1).
+5. `git diff --stat` shows only files that the item owns, plus tests and docs it names.
+6. No assertion was weakened, skipped or deleted to make a check pass.
+7. The eight invariants in `CLAUDE.md` hold. No code, fixture or seed creates a review record.
+8. The item is one commit: imperative subject, 72 characters or fewer, no AI attribution.
+9. If the code clarified the spec, the matching `SPEC.md` section or ADR is updated in the
+   same commit.
+10. The item heading in this file ends with `— DONE <short-sha>`.
+
+An item that fails a check goes to a fix subagent with the raw error output. After two failed
+fix attempts, stop that item. Report the item, both attempts and the log paths to the user.
+
+### Per session
 
 1. `bash scripts/verify.sh` prints `VERIFY: PASS`. Sandbox disabled.
 2. `prek run --all-files` passes.
@@ -337,3 +361,6 @@ After the tracks are merged and `verify.sh` passes:
 4. `NOTES.md` and this file are updated (`/handoff`).
 5. The branch is pushed and a PR into `master` is open. Do not merge it.
 6. Report to the user: each item with its commit SHA, the decisions taken, and any gaps.
+
+A session can end before all items are done. It is still done when items 1, 2, 4 and 6 are
+true for the merged items, and the report lists the open items with their blocker.

@@ -25,7 +25,7 @@ transaction". Never call `credit()` permissionless.
    before the contract exists: qualification does not need PaymentRouter.
 2. After the rekey, the nightly job calls `credit(batchSeq, …)` with the crediter key, once
    per batch. The first batch credits the whole backlog.
-3. The auditor and ops call `claim()`.
+3. The auditor and ops call `claim(identity)` from the address the admin mapped to that identity.
 
 ## payTo (Variant B)
 
@@ -50,9 +50,9 @@ transaction". Never call `credit()` permissionless.
 
 | Method | Caller | Effect |
 |---|---|---|
-| `credit(batchSeq, attributedTotal, unattributedTotal, entries)` | crediter key only | `entries` = auditor `(repo, identity, amount)`, summed per `(repo, identity)` over the batch. Asserts `batchSeq == last + 1` (global state, no box per payment). Asserts sum(entries) == `attributedTotal × 400 / 1000`. Asserts `attributedTotal + unattributedTotal` ≤ unallocated balance. Credits each auditor balance; credits `attributedTotal − sum + unattributedTotal` to ops. |
-| `claim()` | mapped auditor address, or ops | Pays the whole balance. Requires balance ≥ `MIN_CLAIM` (100,000 microUSDC). Inner fee 0; asserts outer fee ≥ 2,000 microALGO (claimant pools the fee). |
-| admin: map identity → address | admin | Maps an auditor identity (`github:<login>`) to the address that signs its review anchors, opted into USDC. |
+| `credit(batchSeq, attributedTotal, unattributedTotal, entries)` | crediter key only | `entries` = auditor `(repo, identity, amount)`, summed per `(repo, identity)` over the batch. `repo` is not stored on-chain; the per-repo breakdown stays in the off-chain ledger. Asserts `batchSeq == last + 1` (global state, no box per payment). Asserts sum(entries) == `attributedTotal × 400 / 1000`. Asserts `attributedTotal + unattributedTotal` ≤ unallocated balance. Credits `balances[identity]` for each entry; credits `attributedTotal − sum + unattributedTotal` to `balances["ops"]`. Needs no identity mapping, so an unmapped identity never stalls a batch. |
+| `claim(identity)` | the address mapped to `identity` (an auditor, or `"ops"`) | Asserts the identity is mapped and `Txn.sender` equals its address. Pays the whole `balances[identity]` to the sender and deletes the box. Requires balance ≥ `MIN_CLAIM` (100,000 microUSDC). Inner fee 0; asserts outer fee ≥ 2,000 microALGO (claimant pools the fee). A remap sends later claims to the new address. |
+| admin: map identity → address | admin | Maps an identity (`github:<login>`, or the fixed `"ops"`) to the address that claims its balance, opted into USDC. |
 | admin: set crediter key | admin | Authorises the crediter key. |
 | `releaseAuthority(to)` | admin | Rekeys `payTo` away from the app. Disclose it publicly. |
 
@@ -87,6 +87,11 @@ with a note transaction (ADR 0007).
 - CAUTION: they do not prove the contract compiles under Puya.
 - CAUTION: inner transactions do not move ledger balances in that harness.
   Balance assertions after `claim()` are arithmetic, not balance reads.
+- CAUTION: Puya rejects `for (const x of abiArray)` over a mutable ABI array argument.
+  Iterate `clone(abiArray)` or use an index loop. The JavaScript tests do not catch this;
+  only `algokit project run build` does.
+- Each new `balances` box needs minimum balance on the app account, not on `payTo`.
+  The deploy step funds the app account.
 - After any contract change, a human runs `algokit project run build` and commits
   the regenerated artifacts under `contracts/smart_contracts/artifacts/`.
 - Amounts are integer micro-units. Never use floats.

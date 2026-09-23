@@ -397,9 +397,9 @@ donor ──facilitator──▶ payTo (plain account, rekeyed to PaymentRouter)
                            │ USDC accrues, unallocated
                            ▼
    nightly job (crediter hot key) ── credit(batchSeq, …) once per batch
-                           │ contract: auditor balance per (repo, identity) + one ops balance
+                           │ contract: one balance per identity (auditor, or "ops")
                            ▼
-   auditor / ops ── claim() ≥ MIN_CLAIM ──▶ inner axfer, sender = payTo
+   auditor / ops ── claim(identity) ≥ MIN_CLAIM ──▶ inner axfer, sender = payTo
 ```
 
 **PaymentRouter rules:**
@@ -413,15 +413,21 @@ donor ──facilitator──▶ payTo (plain account, rekeyed to PaymentRouter)
     multiple of 1,000 µUSDC, so this is exact);
   - `attributedTotal + unattributedTotal` is not above the unallocated balance of `payTo`.
 
-  It credits each auditor balance, and credits `attributedTotal − sum(entries) +
-  unattributedTotal` to the ops balance. `unattributedTotal` is USDC that reached `payTo` with no
-  ledger attribution (§13.2 reconciliation). The 40/60 split is enforced on-chain per batch.
-  There is no rounding: each reviewed package in each payment credits exactly 400 µUSDC.
-- The admin maps each auditor `identity → address`. The admin also sets the crediter key.
-- `claim()` — the payee claims its whole balance. `MIN_CLAIM` = 100,000 µUSDC ($0.10). A claim
-  costs 2,000 µALGO (the app call + one inner axfer). Inner fees are 0 and the claimant pools
-  the fee (`assert(Global.currentApplicationCall.fee >= 2000)`), so the contract pays no fee. At
-  ALGO $0.11 (2026-09-22) the fee is ≈0.2% of `MIN_CLAIM`.
+  It credits each auditor `identity`'s balance directly, and credits `attributedTotal −
+  sum(entries) + unattributedTotal` to the `"ops"` identity's balance. `unattributedTotal` is
+  USDC that reached `payTo` with no ledger attribution (§13.2 reconciliation). The 40/60 split
+  is enforced on-chain per batch. There is no rounding: each reviewed package in each payment
+  credits exactly 400 µUSDC. Balances are keyed by identity, not by address and not by
+  `(repo, identity)`: the per-repo breakdown lives in the off-chain ledger only (§13.2). An
+  identity credit()s before the admin maps it to an address; it just cannot claim() yet.
+- The admin maps each identity (an auditor's `identity`, or the fixed `"ops"` identity) to an
+  address. The admin also sets the crediter key.
+- `claim(identity)` — the address mapped to `identity` claims that identity's whole balance.
+  `MIN_CLAIM` = 100,000 µUSDC ($0.10). A claim costs 2,000 µALGO (the app call + one inner
+  axfer). Inner fees are 0 and the claimant pools the fee
+  (`assert(Global.currentApplicationCall.fee >= 2000)`), so the contract pays no fee. At ALGO
+  $0.11 (2026-09-22) the fee is ≈0.2% of `MIN_CLAIM`. A later admin remap of `identity` moves
+  future claims to the new address; it never touches a balance already claimed.
 - The contract keeps a running total of credited, unclaimed balances, so it can compute the
   unallocated balance as the USDC balance of `payTo` minus that total.
 - Admin-gated `releaseAuthority(to)` carries over from SplitRouter. `attest()` and

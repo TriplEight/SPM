@@ -67,7 +67,7 @@ The attribution tag applies at settlement and is not retroactive.
 | `proxy/` | Hono overlay, x402 routes, DSSE, SQLite status store, ledger, nightly job | `x402-proxy-engineer` |
 | `mcp/`, `cli/` | MCP server and `spm` CLI: `install`, `attest` (opt-in `--donate`), offline `verify` | `mcp-payer-engineer` |
 | `.github/actions/spm-attest/` | CI Action; runs `spm attest`. Fails open. Never reddens a user's CI. | — |
-| `scripts/` | `verify.sh`, `guard.sh`, `e2e.mjs`, `payout.ts`. Reconcile: `pnpm -C proxy reconcile` | `integration-tester` |
+| `scripts/` | `verify.sh`, `guard.sh`, `e2e.mjs`. Reconcile: `pnpm -C proxy reconcile` | `integration-tester` |
 
 Skills: `spm-x402-flow`, `spm-audit-status`, `spm-payment-router`, `spm-testing`.
 Algorand reference skills: `algorand-core`, `algorand-typescript`, `algorand-x402-typescript`,
@@ -82,7 +82,11 @@ pnpm typecheck
 pnpm -C proxy test      # also contracts, mcp, cli
 bash scripts/verify.sh  # all checks; prints VERIFY: PASS
 pnpm exec biome ci .    # zero warnings
+prek run --all-files    # the pre-commit and pre-push hooks; CI runs this too
 ```
+
+One-time setup per clone: `prek install --hook-type pre-commit --hook-type pre-push`.
+If `git config core.hooksPath` prints a value, run `git config --unset core.hooksPath` first.
 
 CAUTION: run proxy tests and `verify.sh` with the Bash sandbox disabled.
 The sandbox blocks the unix sockets that the subprocess tests use.

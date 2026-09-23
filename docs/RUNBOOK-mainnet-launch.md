@@ -291,24 +291,6 @@ mnemonic and no wallet secret.
 
 ## 7. Known open items
 
-- **Payouts are manual.** `scripts/payout.ts` is dry-run by default and takes a
-  key-file argument. Check each claim by hand before paying.
-- **A verified claim cannot be re-opened through the API.** `POST /api/v1/claims`
-  is free and unauthenticated, so it refuses to reset a `verified` row and
-  returns 409. Without that rule anyone who knows a contributor's GitHub login
-  could reset their claim repeatedly and block their payouts, because
-  `scripts/payout.ts` pays only `verified` rows.
-
-  A contributor who loses their nonce, or who needs a new Algorand address,
-  therefore needs an operator. Re-open the row by hand, after checking the
-  request came from the real owner:
-
-  ```sql
-  UPDATE claims SET status = 'pending', nonce = NULL WHERE identity = 'github:<login>';
-  ```
-
-  WARNING: verify the requester out of band first. This statement is the one
-  path that moves a payout address, so treat it as a payout decision.
 - **Legal.** SPM will hold funds owed to third parties. For a German operator
   that may touch payment-services regulation. Get advice before paying anyone
   outside the team. It is not judged in the competition; it is personal

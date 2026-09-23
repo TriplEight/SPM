@@ -58,7 +58,7 @@ Full limits with MBR formulas: [avm-resource-limits.md](./references/avm-resourc
 - **Hard limits are hard** — no clever code bypasses opcode budget or program size limits
 - **No re-entrancy** — applications cannot call themselves, even indirectly through inner transactions
 - **Contract code is not normal code** — `.algo.ts` / `algopy` compiles to TEAL; test/deploy files are normal TS/Python
-- **Read the language skill next** — `algorand-typescript` or `algorand-python` for syntax and patterns
+- **Read the language skill next** — `algorand-typescript` for syntax and patterns
 
 ## Reference Guide
 

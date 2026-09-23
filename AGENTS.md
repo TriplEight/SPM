@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project develops Algorand blockchain applications including smart contracts, frontend interfaces and x402 applications. When working here, always leverage the available skills and MCP tools before writing code—they provide canonical syntax, examples, and documentation that prevent errors and save time.
+This project develops Algorand blockchain applications including smart contracts and x402 applications. When working here, always leverage the available skills and MCP tools before writing code—they provide canonical syntax, examples, and documentation that prevent errors and save time.
 
 ## Creating New Projects
 
@@ -23,11 +23,11 @@ Before writing any smart contract, understand what the AVM actually is — a sta
 Before writing ANY Algorand contract code:
 
 0. **Understand AVM constraints**: Use `algorand-core` skill for the foundational mental model
-1. **Load the skill first**: Use `algorand-typescript` (or `algorand-python` for Python)
+1. **Load the skill first**: Use `algorand-typescript`
 2. **Search docs**: Call `kapa_search_algorand_knowledge_sources` for concepts
 3. **Get examples**: Use `github_get_file_contents` from:
    - `algorandfoundation/devportal-code-examples`
-   - `algorandfoundation/puya-ts` (TypeScript) or `algorandfoundation/puya` (Python)
+   - `algorandfoundation/puya-ts`
 4. **Write code** following skill guidance
 5. **Build/test**: `algokit project run build && algokit project run test`
 
@@ -37,7 +37,7 @@ Use the **CLI and generated typed clients** for deployment and interaction.
 
 ### Workflow
 
-1. **Load the skill**: Use `algorand-typescript` or `algorand-python` — deployment/interaction references are included
+1. **Load the skill**: Use `algorand-typescript` — deployment/interaction references are included
 2. **Start localnet**: `algokit localnet start`
 3. **Build contracts**: `algokit project run build`
 4. **Deploy to localnet**: `algokit project deploy localnet`
@@ -50,23 +50,9 @@ After deployment, interact with contracts using the generated typed client:
 
 1. **Write interaction scripts** using the typed client
 2. **Use the typed client** generated from the ARC-56 app spec
-3. **Run scripts**: `npx tsx scripts/call-contract.ts` (TS) or `python scripts/call_contract.py` (Python)
+3. **Run scripts**: `npx tsx scripts/call-contract.ts`
 
-See the `deploy-interaction.md` reference in your language skill for detailed patterns.
-
-## Building React Frontends
-
-Before building a React frontend that interacts with Algorand contracts:
-
-1. **Load the skill**: Use `algorand-frontend` skill
-2. **Prerequisites**: Deployed contract with known App ID, ARC-56 app spec
-3. **Generate typed client**: `algokit generate client MyContract.arc56.json --output src/contracts/MyContractClient.ts`
-4. **Install deps**: `npm install @algorandfoundation/algokit-utils @txnlab/use-wallet-react algosdk`
-5. **Follow the "signer handoff" pattern**:
-   - Set up `WalletProvider` with `@txnlab/use-wallet-react`
-   - Get `transactionSigner` from `useWallet()` hook
-   - Register signer: `algorand.setSigner(activeAddress, transactionSigner)`
-   - Create typed client with `defaultSender: activeAddress`
+See the `deploy-interaction.md` reference in the `algorand-typescript` skill for detailed patterns.
 
 ## Available Skills
 
@@ -75,10 +61,7 @@ Before building a React frontend that interacts with Algorand contracts:
 | AVM mental model, limits     | `algorand-core`            |
 | Initialize projects, CLI     | `algorand-project-setup`   |
 | TypeScript development       | `algorand-typescript`      |
-| Python development           | `algorand-python`          |
-| React frontends              | `algorand-frontend`        |
 | TypeScript x402 payments     | `algorand-x402-typescript` |
-| Python x402 payments         | `algorand-x402-python`     |
 
 Each language skill covers the full lifecycle: syntax, building, testing, deployment, AlgoKit Utils, ARC standards, and troubleshooting.
 
@@ -201,10 +184,9 @@ Client                  Resource Server           Facilitator           Algorand
 
 ### Building X402 Applications
 
-1. **Pick language**: TypeScript or Python
-2. **Load the skill**: `algorand-x402-typescript` or `algorand-x402-python`
-3. **Choose components**: Client, server, facilitator, paywall — or a subset
-4. **Follow the skill's SKILL.md** router to find reference files for your component
+1. **Load the skill**: `algorand-x402-typescript`
+2. **Choose components**: Client, server, facilitator, paywall — or a subset
+3. **Follow the skill's SKILL.md** router to find reference files for your component
 
 The skills contain everything needed: CAIP-2 network identifiers, package lists, signer protocols, environment variables, common errors, and complete code examples.
 

@@ -13,3 +13,8 @@ payee withdraws without a manual payout. Phase 2 replaces the admin-written clai
 with an oracle-signed identity binding.
 
 Amended by ADR 0005: `credit()` takes numbered batches, not one `settleTxid`.
+
+Amended: balances are per identity, not per repository. A `MIN_CLAIM` floor per repo pool
+would strand small pools below the floor, and paying one identity through many repo pools
+would cost one fee per pool instead of one fee per identity. The per-repo breakdown stays in
+the off-chain ledger (§13.2); the contract sees only an identity and an amount.

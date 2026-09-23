@@ -78,7 +78,17 @@ async function main() {
     }
   })
 
-  // ── 2. Paid gate: seed a COMMUNITY_REVIEWED tarball, expect 402 ──────────
+  // An unreviewed tarball never returns 402, even with the donate header —
+  // the free tier is sacred (CLAUDE.md invariant 4).
+  await check('unreviewed tarball, X-SPM-Donate: 1: still 200, never 402', async () => {
+    const res = await fetch(`${PROXY_URL}/chalk/-/chalk-5.3.0.tgz`, {
+      headers: { 'X-SPM-Donate': '1' },
+    })
+    if (res.status === 402) throw new Error('unreviewed tarball must never return 402')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  })
+
+  // ── 2. Paid gate: seed a COMMUNITY_REVIEWED tarball ───────────────────────
   const PAID_PKG = 'express'
   const PAID_VER = '4.21.2'
   // setStatus() writes through the real status store (better-sqlite3, the
@@ -86,8 +96,21 @@ async function main() {
   // binary dependency, and no hand-written SQL to drift from the schema.
   setStatus(PAID_PKG, PAID_VER, 'COMMUNITY_REVIEWED', 'E2E_AUDITOR', 'E2E_TXID')
 
-  await check(`paid gate: ${PAID_PKG}@${PAID_VER} tarball -> 402`, async () => {
+  // A reviewed tarball is free by default (ADR 0006) — it returns 402 only
+  // when the request opts in with X-SPM-Donate: 1.
+  await check(`reviewed tarball, no donate header: ${PAID_PKG}@${PAID_VER} -> 200`, async () => {
     const res = await fetch(`${PROXY_URL}/${PAID_PKG}/-/${PAID_PKG}-${PAID_VER}.tgz`)
+    if (res.status !== 200) throw new Error(`expected 200, got ${res.status}`)
+    if (!res.headers.get('X-SPM-Tier')) throw new Error('missing X-SPM-Tier response header')
+    if (res.headers.get('X-SPM-Donate-Hint') !== '1000') {
+      throw new Error(`bad X-SPM-Donate-Hint: ${res.headers.get('X-SPM-Donate-Hint')}`)
+    }
+  })
+
+  await check(`paid gate: ${PAID_PKG}@${PAID_VER} tarball, X-SPM-Donate: 1 -> 402`, async () => {
+    const res = await fetch(`${PROXY_URL}/${PAID_PKG}/-/${PAID_PKG}-${PAID_VER}.tgz`, {
+      headers: { 'X-SPM-Donate': '1' },
+    })
     if (res.status !== 402) throw new Error(`expected 402, got ${res.status}`)
 
     // The 402 JSON body is always `{}` — requirements travel in the
@@ -212,24 +235,11 @@ async function main() {
     if (data.status !== 'UNREVIEWED') throw new Error(`got ${data.status}`)
   })
 
-  // ── 7. Claims ledger: earnings + claim registration are free, reachable ──
+  // ── 7. Earnings ledger: free, reachable ───────────────────────────────────
   await check('earnings route: free, reachable', async () => {
     const res = await fetch(`${PROXY_URL}/api/v1/earnings/github/octocat`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     if (res.headers.get('PAYMENT-REQUIRED')) throw new Error('earnings must never be gated')
-  })
-
-  await check('claims route: free, reachable, returns a nonce', async () => {
-    const claimant = algosdk.generateAccount().addr.toString()
-    const res = await fetch(`${PROXY_URL}/api/v1/claims`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ identity: 'github:e2e-octocat', algorandAddress: claimant }),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    if (res.headers.get('PAYMENT-REQUIRED')) throw new Error('claims must never be gated')
-    const data = await res.json()
-    if (!data.nonce) throw new Error('no nonce returned')
   })
 
   // ── 8. On-chain: paid install and the permissionless distribute() split ──
@@ -237,14 +247,14 @@ async function main() {
   // credentials, an unfunded wallet, or a balance below MIN_DISTRIBUTE all
   // print SKIP with the exact reason — never a FAIL, never a silent PASS.
   const payerMnemonic = process.env.SPM_DONOR_MNEMONIC
-  const splitAppId = process.env.SPLIT_APP_ID
-  const splitAppAddress = process.env.SPLIT_APP_ADDRESS
+  const paymentRouterAppId = process.env.PAYMENT_ROUTER_APP_ID
+  const payToAddress = process.env.PAY_TO_ADDRESS
 
-  if (!payerMnemonic || !splitAppId || !splitAppAddress) {
+  if (!payerMnemonic || !paymentRouterAppId || !payToAddress) {
     skip(
       'on-chain: paid install + distribute()',
-      'SPM_DONOR_MNEMONIC / SPLIT_APP_ID / SPLIT_APP_ADDRESS not set — no funded wallet or ' +
-        'deployed contract in this environment',
+      'SPM_DONOR_MNEMONIC / PAYMENT_ROUTER_APP_ID / PAY_TO_ADDRESS not set — no funded wallet ' +
+        'or deployed contract in this environment',
     )
   } else {
     const ALGOD_SERVER =
@@ -293,7 +303,7 @@ async function main() {
 
     let divisible = null
     try {
-      const info = await algod.accountInformation(splitAppAddress).do()
+      const info = await algod.accountInformation(payToAddress).do()
       const holding = (info.assets ?? []).find((a) => String(a.assetId) === String(USDC_ASA_ID))
       const balance = holding ? Number(holding.amount) : 0
       divisible = Math.floor(balance / DIVISIBLE_UNIT) * DIVISIBLE_UNIT
@@ -332,7 +342,7 @@ async function main() {
         const factory = algorand.client.getTypedAppFactory(SplitRouterFactory, {
           defaultSender: account.addr,
         })
-        const { appClient } = await factory.getAppClientById({ appId: BigInt(splitAppId) })
+        const { appClient } = await factory.getAppClientById({ appId: BigInt(paymentRouterAppId) })
 
         // WARNING: the committed ARC-56 artifacts are regenerated by a human
         // with Docker and the AlgoKit CLI (docs/RUNBOOK-contract-build.md).
