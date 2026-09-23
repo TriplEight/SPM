@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
-# Runs the documented demo path end-to-end and prints the Lora URL(s). The
-# G5 demo gate. NETWORK defaults to testnet — the live rehearsal network
-# (CLAUDE.md: "TestNet is for pre-flight rehearsal only").
+# The single operator entry point for a real, on-chain e2e run: starts a
+# real proxy against a real deployed PaymentRouter and runs scripts/e2e.mjs
+# against it, printing every Lora URL. The G5 demo gate. NETWORK defaults to
+# testnet — the live rehearsal network (CLAUDE.md: "TestNet is for
+# pre-flight rehearsal only").
 #
 # WARNING: this script needs a real, funded SPM_DONOR_MNEMONIC and a real
 # deployed PaymentRouter (PAYMENT_ROUTER_APP_ID/PAY_TO_ADDRESS) in .env. It
 # never invents throwaway credentials the way scripts/verify.sh does for its
 # rehearsal run — a demo with a fake wallet proves nothing on stage.
+#
+# scripts/e2e.mjs's 250-package on-chain PaymentRouter credit/claim
+# rehearsal (R3, TestNet only) needs CREDITER_MNEMONIC,
+# E2E_AUDITOR_CLAIM_MNEMONIC and E2E_OPS_CLAIM_MNEMONIC in addition to the
+# variables required below — see .env.example. This script never forces
+# those: e2e.mjs SKIPs that one step, by name, when any of them is absent.
 #
 # NETWORK resolution order (read once, before the banner prints):
 #   1. An explicit NETWORK already set in the operator's shell environment
