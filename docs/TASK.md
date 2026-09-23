@@ -166,7 +166,7 @@ empty; tests pass.
 
 Owner: `x402-proxy-engineer`.
 
-### Q6. Review anchor and `record-review`
+### Q6. Review anchor and `record-review` — DONE 5ca4fe7
 
 Result (SPEC §14, ADR 0007):
 - `scripts/anchor-review.mjs <name> <version> --reviewer <login> --scope <scope>
