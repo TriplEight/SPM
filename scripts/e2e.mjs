@@ -211,7 +211,7 @@ async function main() {
       'version',
       'status',
       'auditor_addr',
-      'attest_txid',
+      'anchor_txid',
       'ts',
       'integrity',
     ]) {
