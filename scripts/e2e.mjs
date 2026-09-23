@@ -78,7 +78,17 @@ async function main() {
     }
   })
 
-  // ── 2. Paid gate: seed a COMMUNITY_REVIEWED tarball, expect 402 ──────────
+  // An unreviewed tarball never returns 402, even with the donate header —
+  // the free tier is sacred (CLAUDE.md invariant 4).
+  await check('unreviewed tarball, X-SPM-Donate: 1: still 200, never 402', async () => {
+    const res = await fetch(`${PROXY_URL}/chalk/-/chalk-5.3.0.tgz`, {
+      headers: { 'X-SPM-Donate': '1' },
+    })
+    if (res.status === 402) throw new Error('unreviewed tarball must never return 402')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  })
+
+  // ── 2. Paid gate: seed a COMMUNITY_REVIEWED tarball ───────────────────────
   const PAID_PKG = 'express'
   const PAID_VER = '4.21.2'
   // setStatus() writes through the real status store (better-sqlite3, the
@@ -86,8 +96,21 @@ async function main() {
   // binary dependency, and no hand-written SQL to drift from the schema.
   setStatus(PAID_PKG, PAID_VER, 'COMMUNITY_REVIEWED', 'E2E_AUDITOR', 'E2E_TXID')
 
-  await check(`paid gate: ${PAID_PKG}@${PAID_VER} tarball -> 402`, async () => {
+  // A reviewed tarball is free by default (ADR 0006) — it returns 402 only
+  // when the request opts in with X-SPM-Donate: 1.
+  await check(`reviewed tarball, no donate header: ${PAID_PKG}@${PAID_VER} -> 200`, async () => {
     const res = await fetch(`${PROXY_URL}/${PAID_PKG}/-/${PAID_PKG}-${PAID_VER}.tgz`)
+    if (res.status !== 200) throw new Error(`expected 200, got ${res.status}`)
+    if (!res.headers.get('X-SPM-Tier')) throw new Error('missing X-SPM-Tier response header')
+    if (res.headers.get('X-SPM-Donate-Hint') !== '1000') {
+      throw new Error(`bad X-SPM-Donate-Hint: ${res.headers.get('X-SPM-Donate-Hint')}`)
+    }
+  })
+
+  await check(`paid gate: ${PAID_PKG}@${PAID_VER} tarball, X-SPM-Donate: 1 -> 402`, async () => {
+    const res = await fetch(`${PROXY_URL}/${PAID_PKG}/-/${PAID_PKG}-${PAID_VER}.tgz`, {
+      headers: { 'X-SPM-Donate': '1' },
+    })
     if (res.status !== 402) throw new Error(`expected 402, got ${res.status}`)
 
     // The 402 JSON body is always `{}` — requirements travel in the
