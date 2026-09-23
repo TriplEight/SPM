@@ -126,7 +126,7 @@ attestation.
 
 Owner: `x402-proxy-engineer`.
 
-### Q3. Lockfile price per reviewed package
+### Q3. Lockfile price per reviewed package — DONE bda3a0d
 
 Result (SPEC §11.2, ADR 0008): the lockfile route price is a `DynamicPrice` function of
 1,000 µUSDC × N, where N counts reviewed entries whose integrity matches. N comes from the
