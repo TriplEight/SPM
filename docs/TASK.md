@@ -241,7 +241,7 @@ script. A MainNet action refuses without `--confirm-mainnet`. Fix the macOS `sed
 Acceptance: `shellcheck` is clean; tests for both networks; the existing MainNet tests of
 `check-402.mjs` pass unchanged.
 
-### Q11. Public texts and donor guide
+### Q11. Public texts and donor guide — DONE c5a173d
 
 Result: README, `og:description` and the Bazaar descriptions show both splits (SPEC §6.2)
 and "$0.001 per reviewed package". README gets a donor section (SPEC §11.4): a fresh donor
