@@ -318,14 +318,14 @@ After the tracks are merged and `verify.sh` passes:
    sets `RequiresMountsFor=<SPM_BACKUP_HOST_DIR>`. If the mount fails, the job does not start
    and no credit occurs. Check: unmount the store, start the job, and see that it does not run.
 
-### Q13. Issuer URL required on MainNet
+### Q13. Issuer URL and key date required on every network — DONE c65edd5
 
-Result: with `NETWORK=mainnet`, the server refuses to boot when `SPM_ISSUER_URL` is unset or
-is the placeholder in `proxy/src/config.ts`. The team does not own the placeholder domain.
+Result: on every network, the server refuses to boot when `SPM_ISSUER_URL` is not an
+`https://` origin or `SPM_KEY_VALID_FROM` is not an ISO-8601 UTC time. Neither has a default.
+`compose.yaml` refuses to start without them. TestNet tests the same config as MainNet. The team does not own the placeholder domain.
 Every signed statement carries the issuer, so a wrong value cannot be corrected later.
 
-Acceptance: tests for unset, placeholder, and a valid HTTPS URL on MainNet; TestNet boots
-without it. Owner: `x402-proxy-engineer`.
+Acceptance: tests for unset, malformed and valid values on both networks. Owner: `x402-proxy-engineer`.
 
 ## Order
 
