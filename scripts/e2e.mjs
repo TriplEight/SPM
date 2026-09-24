@@ -32,7 +32,7 @@ import {
 import { assertSqliteWriteAllowed } from './e2e-guard.mjs'
 import { algodEndpoint, indexerEndpoint, usdcAssetId } from './network.mjs'
 import { optinAccountToUsdc } from './optin-usdc.mjs'
-import { rekeyPayToToApp } from './rekey-payto.mjs'
+import { assertNetworkMatchesGenesis, rekeyPayToToApp } from './rekey-payto.mjs'
 
 // Anchors a CJS `require()` at each workspace package's own node_modules —
 // scripts/ has no node_modules of its own. Mirrors the pattern already
@@ -70,6 +70,72 @@ async function check(name, fn) {
 function skip(name, reason) {
   console.log(`  ${name}: SKIP - ${reason}`)
   skipped++
+}
+
+// ── Genesis guard (R3c) ────────────────────────────────────────────────────
+//
+// A live .env with NETWORK=testnet but ALGOD_SERVER/INDEXER_URL pointed at
+// MainNet reads MainNet balances and looks up MainNet txids under a
+// TestNet-labelled run, printing misleading errors ("deployer holds 0
+// microALGO", "indexer never confirmed txid") instead of naming the real
+// cause. assertChainGenesisMatches is pure — it reuses rekey-payto.mjs's
+// own assertNetworkMatchesGenesis for the actual comparison (never a second
+// copy of the network -> genesis-id mapping) and only adds the endpoint URL
+// and the env var to fix to the message.
+
+/**
+ * Refuses when `component`'s already-fetched genesis id does not match
+ * `network`. Pure: no network access itself — see
+ * assertNetworkGenesisMatchesEverywhere below for the real fetch.
+ *
+ * @param {'algod'|'indexer'} component
+ * @param {'testnet'|'mainnet'} network
+ * @param {string} genesisId - the component's own reported genesis id.
+ * @param {string} endpointUrl - the URL this run queried.
+ * @param {string} envVar - the env var that points `component` at endpointUrl.
+ */
+export function assertChainGenesisMatches(component, network, genesisId, endpointUrl, envVar) {
+  try {
+    assertNetworkMatchesGenesis(network, genesisId)
+  } catch {
+    throw new Error(
+      `${component} genesis id "${genesisId}" from ${endpointUrl} does not match ` +
+        `NETWORK=${network}; fix ${envVar} (or NETWORK) — refusing every further on-chain ` +
+        'check against a possibly wrong chain',
+    )
+  }
+}
+
+/**
+ * Fetches algod's and the indexer's own genesis ids for `network` and
+ * checks both against it. WARNING: call this first in every path that
+ * reaches algod or the indexer — nothing on-chain may run before it.
+ *
+ * @param {'testnet'|'mainnet'} network
+ */
+async function assertNetworkGenesisMatchesEverywhere(network) {
+  const { server: algodServer, port: algodPort, token: algodToken } = algodEndpoint(network)
+  const algod = new algosdk.Algodv2(algodToken, algodServer, algodPort)
+  const sp = await algod.getTransactionParams().do()
+  assertChainGenesisMatches('algod', network, sp.genesisID ?? '', algodServer, 'ALGOD_SERVER')
+
+  const { server: indexerServer, token: indexerToken } = indexerEndpoint(network)
+  const res = await fetch(`${indexerServer}/health`, {
+    headers: indexerToken ? { 'X-Indexer-API-Token': indexerToken } : {},
+  })
+  if (!res.ok) {
+    throw new Error(
+      `indexer genesis check: GET ${indexerServer}/health returned HTTP ${res.status}`,
+    )
+  }
+  const health = await res.json()
+  assertChainGenesisMatches(
+    'indexer',
+    network,
+    health['genesis-id'] ?? '',
+    indexerServer,
+    'INDEXER_URL',
+  )
 }
 
 // ATTEST_SIGNING_KEY is either a 25-word Algorand mnemonic or a hex-encoded
@@ -220,8 +286,9 @@ export function onChainRehearsalSkipReason(network, env) {
 //
 // The deployer pays for every fresh account's minimum balance and fees, in
 // one run: payTo (opt-in + rekey), the auditor claimant (opt-in + claim),
-// the ops claimant (opt-in + claim), the app account's own box MBR, and
-// the deploy call fees themselves.
+// the ops claimant (opt-in + claim), the app account's own box MBR, the
+// deployer's own creator MBR increase from creating the app, and the
+// deploy call fees themselves.
 
 const ACCOUNT_MBR_MICRO_ALGO = 100_000
 const ASSET_MBR_MICRO_ALGO = 100_000
@@ -237,6 +304,58 @@ const DEPLOY_CALL_FEES_MICRO_ALGO = 10_000
 const FUNDING_TXN_FEES_MICRO_ALGO = STANDARD_FEE_MICRO_ALGO * 4
 // Keeps the deployer's own MBR intact after every send in the run.
 const DEPLOYER_RESERVE_MICRO_ALGO = 100_000
+
+// AVM consensus MBR constants for creating an application (algod's
+// MinBalance rules): a base amount per app (repeated per extra program
+// page), plus a per-key amount for each declared global uint and each
+// declared global byte-slice. Creating an app raises the CREATOR's own min
+// balance by this amount, separately from APP_ACCOUNT_FUNDING_MICRO_ALGO
+// above (the app account's own box MBR) — a live TestNet run (R3c
+// coordinator note) undercounted this and failed setIdentity in simulate
+// with "balance ... below min".
+const APP_CREATION_BASE_MBR_MICRO_ALGO = 100_000
+const GLOBAL_UINT_MBR_MICRO_ALGO = 28_500
+const GLOBAL_BYTE_SLICE_MBR_MICRO_ALGO = 50_000
+const MAX_APP_PROGRAM_LEN_BYTES = 2_048
+
+function readPaymentRouterArc56Spec() {
+  const specPath = path.join(
+    scriptDir,
+    '..',
+    'contracts',
+    'smart_contracts',
+    'artifacts',
+    'payment_router',
+    'PaymentRouter.arc56.json',
+  )
+  return JSON.parse(fs.readFileSync(specPath, 'utf8'))
+}
+
+/**
+ * The deployer's own min-balance increase from creating one PaymentRouter
+ * app (AVM consensus formula) — driven entirely by the compiled ARC-56
+ * spec's declared global schema and compiled program length, never a
+ * hardcoded guess, so a future schema or program-size change is caught by
+ * this function's own pinned test rather than silently under-funding the
+ * deployer.
+ *
+ * @param {object} [spec] - defaults to the real compiled PaymentRouter spec.
+ * @returns {number}
+ */
+export function creatorAppMbrIncreaseMicroAlgo(spec = readPaymentRouterArc56Spec()) {
+  const globalSchema = spec.state.schema.global
+  const approvalLen = Buffer.from(spec.byteCode.approval, 'base64').length
+  const clearLen = Buffer.from(spec.byteCode.clear, 'base64').length
+  const extraPages = Math.max(
+    0,
+    Math.ceil((approvalLen + clearLen) / MAX_APP_PROGRAM_LEN_BYTES) - 1,
+  )
+  return (
+    APP_CREATION_BASE_MBR_MICRO_ALGO * (1 + extraPages) +
+    GLOBAL_UINT_MBR_MICRO_ALGO * globalSchema.ints +
+    GLOBAL_BYTE_SLICE_MBR_MICRO_ALGO * globalSchema.bytes
+  )
+}
 
 /** MBR + one ASA opt-in's MBR increase + the opt-in fee + the rekey fee. */
 export function payToFundingMicroAlgo() {
@@ -254,6 +373,7 @@ export function deployerFundingTotalMicroAlgo() {
     payToFundingMicroAlgo() +
     claimantFundingMicroAlgo() * 2 + // the auditor claimant and the ops claimant
     APP_ACCOUNT_FUNDING_MICRO_ALGO +
+    creatorAppMbrIncreaseMicroAlgo() +
     DEPLOY_CALL_FEES_MICRO_ALGO +
     FUNDING_TXN_FEES_MICRO_ALGO +
     DEPLOYER_RESERVE_MICRO_ALGO
@@ -639,6 +759,12 @@ async function runOnChainRehearsal(loraUrl) {
   console.log(`  (rehearsal ops claimant: ${opsAccount.addr})`)
 
   const preconditionsOk = await check('on-chain: hermetic rehearsal preconditions', async () => {
+    // Genesis guard first (R3c): nothing on-chain below this line may run
+    // before algod and the indexer both agree with the rehearsal's own
+    // TestNet-only network (onChainRehearsalSkipReason already refuses
+    // MainNet before this function is ever called).
+    await assertNetworkGenesisMatchesEverywhere('testnet')
+
     assertRehearsalKeysDistinct({
       deployerAddress: deployerAccount.addr.toString(),
       crediterAddress: crediterAccount.addr.toString(),
@@ -1076,6 +1202,10 @@ async function main() {
   } else {
     let paymentTxid
     await check('on-chain: paid install -> plain USDC transfer, no inner txns', async () => {
+      // Genesis guard first (R3c): nothing on-chain below this line may run
+      // before algod and the indexer both agree with NETWORK.
+      await assertNetworkGenesisMatchesEverywhere(NETWORK)
+
       // Reuses the real MCP install tool — never a hand-rolled payment flow.
       const { installTool } = await import('../mcp/src/tools/install.js')
       const result = await installTool.handler({

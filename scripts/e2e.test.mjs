@@ -13,11 +13,13 @@ import { test } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { importWithoutEnvMutation } from './assert-no-env-import.mjs'
 import {
+  assertChainGenesisMatches,
   assertDeployerFunded,
   assertDonorFundedForRehearsal,
   assertPlainUsdcTransferNoInner,
   assertRehearsalKeysDistinct,
   claimantFundingMicroAlgo,
+  creatorAppMbrIncreaseMicroAlgo,
   deployerFundingTotalMicroAlgo,
   onChainRehearsalSkipReason,
   payToFundingMicroAlgo,
@@ -92,7 +94,78 @@ test("claimantFundingMicroAlgo covers MBR, one ASA opt-in, the opt-in fee, and c
 })
 
 test('deployerFundingTotalMicroAlgo funds payTo, both claimants, the app account, and deploy fees', () => {
-  assert.equal(deployerFundingTotalMicroAlgo(), 1_722_000)
+  assert.equal(deployerFundingTotalMicroAlgo(), 2_007_500)
+})
+
+// --- Creator app-creation MBR (coordinator scope addition, R3c) ------------
+
+test('creatorAppMbrIncreaseMicroAlgo pins the real PaymentRouter schema (3 global uints, 2 global byte-slices, 0 extra pages)', () => {
+  assert.equal(creatorAppMbrIncreaseMicroAlgo(), 285_500)
+})
+
+test('creatorAppMbrIncreaseMicroAlgo grows when the global schema grows — never a hardcoded guess', () => {
+  const spec = {
+    state: { schema: { global: { ints: 3, bytes: 2 } } },
+    byteCode: { approval: Buffer.from('x'.repeat(100)).toString('base64'), clear: '' },
+  }
+  const before = creatorAppMbrIncreaseMicroAlgo(spec)
+  const grownUint = {
+    ...spec,
+    state: { schema: { global: { ints: 4, bytes: 2 } } },
+  }
+  assert.equal(creatorAppMbrIncreaseMicroAlgo(grownUint), before + 28_500)
+  const grownBytes = {
+    ...spec,
+    state: { schema: { global: { ints: 3, bytes: 3 } } },
+  }
+  assert.equal(creatorAppMbrIncreaseMicroAlgo(grownBytes), before + 50_000)
+})
+
+test('creatorAppMbrIncreaseMicroAlgo adds a base MBR per extra program page', () => {
+  const spec = {
+    state: { schema: { global: { ints: 0, bytes: 0 } } },
+    byteCode: { approval: Buffer.from('x'.repeat(4_096)).toString('base64'), clear: '' },
+  }
+  assert.equal(creatorAppMbrIncreaseMicroAlgo(spec), 200_000)
+})
+
+// --- Genesis guard (R3c) -----------------------------------------------------
+
+test('assertChainGenesisMatches passes when the genesis id matches the network', () => {
+  assert.doesNotThrow(() =>
+    assertChainGenesisMatches('algod', 'testnet', 'testnet-v1.0', 'https://x', 'ALGOD_SERVER'),
+  )
+  assert.doesNotThrow(() =>
+    assertChainGenesisMatches('indexer', 'mainnet', 'mainnet-v1.0', 'https://y', 'INDEXER_URL'),
+  )
+})
+
+test('assertChainGenesisMatches FAILs an algod genesis mismatch, naming NETWORK, the URL, and the env var', () => {
+  assert.throws(
+    () =>
+      assertChainGenesisMatches(
+        'algod',
+        'testnet',
+        'mainnet-v1.0',
+        'https://mainnet-api.algonode.cloud',
+        'ALGOD_SERVER',
+      ),
+    /algod genesis id "mainnet-v1\.0" from https:\/\/mainnet-api\.algonode\.cloud does not match NETWORK=testnet.*ALGOD_SERVER/s,
+  )
+})
+
+test('assertChainGenesisMatches FAILs an indexer genesis mismatch, naming NETWORK, the URL, and the env var', () => {
+  assert.throws(
+    () =>
+      assertChainGenesisMatches(
+        'indexer',
+        'testnet',
+        'mainnet-v1.0',
+        'https://mainnet-idx.algonode.cloud',
+        'INDEXER_URL',
+      ),
+    /indexer genesis id "mainnet-v1\.0" from https:\/\/mainnet-idx\.algonode\.cloud does not match NETWORK=testnet.*INDEXER_URL/s,
+  )
 })
 
 // --- Preconditions (R3a) ----------------------------------------------------
