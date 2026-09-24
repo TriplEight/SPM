@@ -842,6 +842,14 @@ async function runOnChainRehearsal(loraUrl) {
         [ONCHAIN_IDENTITY, auditorAccount.addr.toString()],
         [ONCHAIN_OPS_IDENTITY, opsAccount.addr.toString()],
       ])
+      // A unique app name per run (R3d): algokit's idempotent
+      // factory.deploy() looks up an existing app by creator + name, and a
+      // fixed "PaymentRouter" name let a live TestNet run find and reuse an
+      // earlier failed rehearsal's leftover app — silently setting
+      // crediter/identities on it before the rekey guard caught the
+      // mismatch. requireFreshCreate makes deployPaymentRouter itself
+      // refuse (before any setCrediter/setIdentity call) unless this run's
+      // own deploy performed a fresh "create".
       const result = await deployPaymentRouter({
         algorand,
         network: 'testnet',
@@ -849,6 +857,8 @@ async function runOnChainRehearsal(loraUrl) {
         crediterAddress: crediterAccount.addr.toString(),
         payToAddress: payToAccount.addr.toString(),
         identityMap,
+        appName: `PaymentRouter-e2e-${Date.now()}`,
+        requireFreshCreate: true,
       })
       appId = result.appId
       return `app ${appId}`
