@@ -335,3 +335,12 @@ Next: `docs/TASK.md`, wave 1.
   SPM runs no status check. SPEC §13.2 and TASK D1 item 6 updated.
 - Blocked (human): fund the TestNet deployer with ≥1.8 ALGO.
 - Next: rerun R4 part 1; each rerun sends one more 1,000 µUSDC step-8 payment to payTo.
+
+## 2026-09-24 — wave 4: R3c and R4 part 1 retries
+- Run 2 FAIL: `.env` had MainNet `ALGOD_SERVER`/`INDEXER_URL` with `NETWORK=testnet` (fixed by
+  the user). Step 8 paid `WR74UFPYIWOZWMHMVAE7LLWHUIOAVICF7COMZEA6R65HEPYEWSAA` (TestNet 67618437).
+- Run 3 FAIL at `setIdentity`: the deployer budget missed the creator app MBR (short by 500
+  µALGO). Step 8 paid `P6LJCYPS7XS4KDSI4RAA5H424TEXRCOPALZTHEWSFLIGRRESAJSA`. Stranded
+  throwaway app 772548283 (create `Z5PRXVX2SCXSGY2EK4SUNPFMJU7DBHAOHE33QH7AOYLLTVPRATBA`).
+- R3c `cb15d02`: genesis guard in the e2e and the nightly job; budget 2,007,500 µALGO/run.
+- Next: fund the deployer (E3P6K5E5…) with ~5 TestNet ALGO, then rerun R4 part 1.

@@ -304,6 +304,13 @@ Result: the offline attestation check parses `ATTEST_SIGNING_KEY` with the proxy
 (mnemonic or hex seed). The paid-install check reads the txid from the indexer with a bounded
 retry, not from the algod pool. Precondition errors name the account address.
 
+### R3c. Genesis guard and deployer budget — DONE cb15d02
+
+Result: the e2e and the nightly job check the algod and indexer genesis against `NETWORK`
+before any on-chain step, and stop with the endpoint and env var in the message. The
+rehearsal's deployer budget includes the creator's app min-balance increase, computed from the
+ARC-56 schema (2,007,500 µALGO per run).
+
 ### R4. TestNet rehearsal (before the MainNet rekey)
 
 Result, in two parts:
@@ -351,7 +358,7 @@ Acceptance: tests for unset, malformed and valid values on both networks. Owner:
 - **Wave 2:** Q2 → Q3; Q4; Q6; Q8; H3.
 - **Wave 3:** Q7; Q11; Q12; R2. H2 when the user is present.
 - **Qualification (human, by Sept 25):** SPEC §17 Q steps 1–6 on MainNet.
-- **Wave 4:** R3 → R3a → Q13 → R3b → R4 → MainNet rekey and first credit → D1.
+- **Wave 4:** R3 → R3a → Q13 → R3b → R3c → R4 → MainNet rekey and first credit → D1.
 
 ## After the MVP
 
