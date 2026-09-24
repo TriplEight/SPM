@@ -318,7 +318,7 @@ deploy created it. The operator deploy keeps the name "PaymentRouter" and refuse
 admin call, when the existing app's stored payTo or asset differs from `.env`.
 Also fixed with R3c: the indexer genesis comes from `/v2/blocks/1` (`8465742`), not `/health`.
 
-### R3e. Operator deploy entry point
+### R3e. Operator deploy entry point — DONE f9bfe38
 
 Result: `pnpm run deploy:ci` (and `algokit project deploy`) runs in `contracts/`; the client
 reads `INDEXER_URL` with per-network defaults; a failed deploy exits non-zero. Found in R4
@@ -376,6 +376,13 @@ Acceptance: tests for unset, malformed and valid values on both networks. Owner:
 - **Wave 3:** Q7; Q11; Q12; R2. H2 when the user is present.
 - **Qualification (human, by Sept 25):** SPEC §17 Q steps 1–6 on MainNet.
 - **Wave 4:** R3 → R3a → Q13 → R3b → R3c → R3d → R3e → R4 → MainNet rekey and first credit → D1.
+
+### S1. Dependency advisories
+
+`pnpm audit --audit-level=moderate` reports 47 advisories on `master` (for example `hono`,
+`@hono/node-server`, `brace-expansion`, `fast-uri`). `hono` and `@hono/node-server` are proxy
+production dependencies. Result: triage each advisory, upgrade with exact pins, and re-run the
+proxy tests. Check: no moderate-or-higher advisory in a production dependency.
 
 ## After the MVP
 
