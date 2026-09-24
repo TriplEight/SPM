@@ -313,6 +313,19 @@ After the tracks are merged and `verify.sh` passes:
 4. ASD-STE100 style. Every command must exist in the repository. Every step has a "Check:"
    line.
 5. Remove the WARNING banners from both runbooks.
+6. Backup (decided: sshfs). `SPM_BACKUP_HOST_DIR` is an sshfs mount of the off-host store,
+   owned by uid 1000 (`uid=1000,gid=1000,allow_other`). A drop-in for `spm-nightly.service`
+   sets `RequiresMountsFor=<SPM_BACKUP_HOST_DIR>`. If the mount fails, the job does not start
+   and no credit occurs. Check: unmount the store, start the job, and see that it does not run.
+
+### Q13. Issuer URL required on MainNet
+
+Result: with `NETWORK=mainnet`, the server refuses to boot when `SPM_ISSUER_URL` is unset or
+is the placeholder in `proxy/src/config.ts`. The team does not own the placeholder domain.
+Every signed statement carries the issuer, so a wrong value cannot be corrected later.
+
+Acceptance: tests for unset, placeholder, and a valid HTTPS URL on MainNet; TestNet boots
+without it. Owner: `x402-proxy-engineer`.
 
 ## Order
 
@@ -320,7 +333,15 @@ After the tracks are merged and `verify.sh` passes:
 - **Wave 2:** Q2 → Q3; Q4; Q6; Q8; H3.
 - **Wave 3:** Q7; Q11; Q12; R2. H2 when the user is present.
 - **Qualification (human, by Sept 25):** SPEC §17 Q steps 1–6 on MainNet.
-- **Wave 4:** R3 → R4 → MainNet rekey and first credit → D1.
+- **Wave 4:** R3 → R4 → Q13 → MainNet rekey and first credit → D1.
+
+## After the MVP
+
+- **A1. Auditor onboarding at run time.** Adding or removing an auditor needs no `.env` edit,
+  no redeploy and no restart. Today the list lives in `AUDITORS` (read by
+  `scripts/record-review.mjs` and the deploy), and only the deploy calls `setIdentity()`.
+  Result: one admin command maps the identity on-chain (`setIdentity`), checks the USDC
+  opt-in, and records the auditor where `record-review` reads it.
 
 ## Human-only items
 
