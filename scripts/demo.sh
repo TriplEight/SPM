@@ -62,9 +62,14 @@ if [ "$NETWORK" = "mainnet" ]; then
   fi
 fi
 
-# Required for every check below to run for real, not SKIP.
+# Required for every check below to run for real, not SKIP. SPM_ISSUER_URL
+# and SPM_KEY_VALID_FROM (Q13) are public config, not secrets, but the
+# server refuses to boot without them on every network — this script never
+# invents throwaway values for them the way scripts/verify.sh does, so a
+# missing one here is a real .env gap, not something to paper over.
 missing=""
-for var in PAYMENT_ROUTER_APP_ID PAY_TO_ADDRESS SPM_DONOR_MNEMONIC ATTEST_SIGNING_KEY; do
+for var in PAYMENT_ROUTER_APP_ID PAY_TO_ADDRESS SPM_DONOR_MNEMONIC ATTEST_SIGNING_KEY \
+  SPM_ISSUER_URL SPM_KEY_VALID_FROM; do
   if [ -z "${!var:-}" ]; then
     missing="$missing $var"
   fi
@@ -74,7 +79,8 @@ if [ -n "$missing" ]; then
   echo "       Deploy PaymentRouter and rekey payTo first, and set ATTEST_SIGNING_KEY."
   exit 1
 fi
-export PAYMENT_ROUTER_APP_ID PAY_TO_ADDRESS SPM_DONOR_MNEMONIC ATTEST_SIGNING_KEY
+export PAYMENT_ROUTER_APP_ID PAY_TO_ADDRESS SPM_DONOR_MNEMONIC ATTEST_SIGNING_KEY \
+  SPM_ISSUER_URL SPM_KEY_VALID_FROM
 
 # Kill any stale proxy on the configured port before starting ours.
 PORT="${PORT:-4873}"
