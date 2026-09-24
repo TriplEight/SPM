@@ -281,7 +281,7 @@ holds USDC.
 
 Acceptance: unit checks for both refusals and the MainNet guard. Depends on R1 and Q10.
 
-### R3. On-chain e2e step
+### R3. On-chain e2e step — DONE 8b948ca
 
 Result: when the app id, `payTo`, the crediter key and a funded donor key are set, the e2e
 step pays, runs the nightly job and claims against the real network. It reports PASS or FAIL,
@@ -290,12 +290,54 @@ never a false PASS. Without them, it SKIPs with its reason. Merge the useful par
 
 Depends on R1, R2, Q7.
 
+### R3a. Self-contained rehearsal — DONE 8c9e0b2
+
+Result: each rehearsal run makes its own `payTo`, claimants, PaymentRouter app and proxy with a
+throwaway ledger, so a run never meets another ledger's batch sequence. It needs only the
+deployer (about 1.72 ALGO per run), crediter and donor (0.25 USDC) keys. No script loads `.env`
+on import; tests prove it without opening the real file. Step 8 sends the donation opt-in.
+Commits `faa59b2` (rehearsal) and `8c9e0b2` (tests never touch the real `.env`).
+
+### R3b. Fixes from the first live run — DONE 6740615
+
+Result: the offline attestation check parses `ATTEST_SIGNING_KEY` with the proxy's own parser
+(mnemonic or hex seed). The paid-install check reads the txid from the indexer with a bounded
+retry, not from the algod pool. Precondition errors name the account address.
+
+### R3c. Genesis guard and deployer budget — DONE cb15d02
+
+Result: the e2e and the nightly job check the algod and indexer genesis against `NETWORK`
+before any on-chain step, and stop with the endpoint and env var in the message. The
+rehearsal's deployer budget includes the creator's app min-balance increase, computed from the
+ARC-56 schema (2,007,500 µALGO per run).
+
+### R3d. Unique rehearsal app; guarded operator deploy — DONE 95e3f27
+
+Result: each rehearsal run creates an app named `PaymentRouter-e2e-<ms>` and fails unless the
+deploy created it. The operator deploy keeps the name "PaymentRouter" and refuses, before any
+admin call, when the existing app's stored payTo or asset differs from `.env`.
+Also fixed with R3c: the indexer genesis comes from `/v2/blocks/1` (`8465742`), not `/health`.
+
+### R3e. Operator deploy entry point — DONE f9bfe38
+
+Result: `pnpm run deploy:ci` (and `algokit project deploy`) runs in `contracts/`; the client
+reads `INDEXER_URL` with per-network defaults; a failed deploy exits non-zero. Found in R4
+part 2 (see `NOTES.md`). Owner: `algorand-contract-engineer`.
+
 ### R4. TestNet rehearsal (before the MainNet rekey)
 
-Result: on TestNet: `payTo` opt-in → one payment through GoPlausible → deploy → rekey →
-nightly job credits batch 1 → `claim()` for the auditor and for ops.
+Result, in two parts:
+1. Claim rehearsal — DONE 2026-09-24 (txids in `NOTES.md`):
+   `NETWORK=testnet bash scripts/demo.sh` PASSes. One lockfile payment with
+   250 reviewed entries (250,000 µUSDC) → nightly job credits batch 1 → `claim()` for the
+   auditor (100,000) and for ops (150,000). One tarball payment credits only 400 / 600, below
+   `MIN_CLAIM`, so the rehearsal uses 250 entries. The contract stays unchanged.
+2. Persistent TestNet deploy, as on MainNet: the operator's `payTo` opt-in → deploy
+   PaymentRouter → rekey → Compose at the TestNet domain → one real anchored review → one
+   payment through GoPlausible → nightly job (backup, credit batch 1). Deployed app 772553842;
+   the step guide is in `NOTES.md`.
 
-Acceptance: the txid of each step is in `NOTES.md`; R3 PASSes on TestNet.
+Acceptance: the txid of each step is in `NOTES.md`.
 
 ### D1. Rewrite the operator docs (last)
 
@@ -310,6 +352,22 @@ After the tracks are merged and `verify.sh` passes:
 4. ASD-STE100 style. Every command must exist in the repository. Every step has a "Check:"
    line.
 5. Remove the WARNING banners from both runbooks.
+6. Backup (decided: the host's restic/Backrest plan, no status check in SPM).
+   `SPM_BACKUP_HOST_DIR` is a local directory owned by uid 1000. The Backrest plan includes it,
+   runs daily after the nightly timer (03:17 UTC), excludes `.audit-*.db.tmp`, and alerts the
+   operator on a snapshot error. Check: after one night, the newest `audit-*.db` is in the
+   latest snapshot.
+7. TestNet and MainNet share one host: document a separate directory, Compose project name,
+   port, volume, nightly unit and `cloudflared` ingress rule for each.
+
+### Q13. Issuer URL and key date required on every network — DONE c65edd5
+
+Result: on every network, the server refuses to boot when `SPM_ISSUER_URL` is not an
+`https://` origin or `SPM_KEY_VALID_FROM` is not an ISO-8601 UTC time. Neither has a default.
+`compose.yaml` refuses to start without them. TestNet tests the same config as MainNet. The team does not own the placeholder domain.
+Every signed statement carries the issuer, so a wrong value cannot be corrected later.
+
+Acceptance: tests for unset, malformed and valid values on both networks. Owner: `x402-proxy-engineer`.
 
 ## Order
 
@@ -317,7 +375,22 @@ After the tracks are merged and `verify.sh` passes:
 - **Wave 2:** Q2 → Q3; Q4; Q6; Q8; H3.
 - **Wave 3:** Q7; Q11; Q12; R2. H2 when the user is present.
 - **Qualification (human, by Sept 25):** SPEC §17 Q steps 1–6 on MainNet.
-- **Wave 4:** R3 → R4 → MainNet rekey and first credit → D1.
+- **Wave 4:** R3 → R3a → Q13 → R3b → R3c → R3d → R3e → R4 → MainNet rekey and first credit → D1.
+
+### S1. Dependency advisories
+
+`pnpm audit --audit-level=moderate` reports 47 advisories on `master` (for example `hono`,
+`@hono/node-server`, `brace-expansion`, `fast-uri`). `hono` and `@hono/node-server` are proxy
+production dependencies. Result: triage each advisory, upgrade with exact pins, and re-run the
+proxy tests. Check: no moderate-or-higher advisory in a production dependency.
+
+## After the MVP
+
+- **A1. Auditor onboarding at run time.** Adding or removing an auditor needs no `.env` edit,
+  no redeploy and no restart. Today the list lives in `AUDITORS` (read by
+  `scripts/record-review.mjs` and the deploy), and only the deploy calls `setIdentity()`.
+  Result: one admin command maps the identity on-chain (`setIdentity`), checks the USDC
+  opt-in, and records the auditor where `record-review` reads it.
 
 ## Human-only items
 

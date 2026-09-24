@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# Runs the documented demo path end-to-end and prints the Lora URL(s). The
-# G5 demo gate. NETWORK defaults to testnet — the live rehearsal network
-# (CLAUDE.md: "TestNet is for pre-flight rehearsal only").
+# The single operator entry point for a real, on-chain e2e run: starts a
+# real proxy and runs scripts/e2e.mjs against it, printing every Lora URL.
+# The G5 demo gate. NETWORK defaults to testnet — the live rehearsal
+# network (CLAUDE.md: "TestNet is for pre-flight rehearsal only").
 #
 # WARNING: this script needs a real, funded SPM_DONOR_MNEMONIC and a real
-# deployed PaymentRouter (PAYMENT_ROUTER_APP_ID/PAY_TO_ADDRESS) in .env. It
-# never invents throwaway credentials the way scripts/verify.sh does for its
-# rehearsal run — a demo with a fake wallet proves nothing on stage.
+# payTo (PAY_TO_ADDRESS) in .env. It never invents throwaway credentials the
+# way scripts/verify.sh does for its rehearsal run — a demo with a fake
+# wallet proves nothing on stage.
+#
+# scripts/e2e.mjs's 250-package on-chain PaymentRouter credit/claim
+# rehearsal (R3a, TestNet only, hermetic) needs DEPLOYER_MNEMONIC and
+# CREDITER_MNEMONIC in addition to the variables required below — see
+# .env.example. This script never forces those: e2e.mjs SKIPs that one
+# step, by name, when any of them is absent.
 #
 # NETWORK resolution order (read once, before the banner prints):
 #   1. An explicit NETWORK already set in the operator's shell environment
@@ -23,8 +30,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Capture any operator-supplied NETWORK before .env can overwrite it.
 NETWORK_FROM_SHELL="${NETWORK:-}"
 
-# Load root .env so PAYMENT_ROUTER_APP_ID, SPM_DONOR_MNEMONIC,
-# PAY_TO_ADDRESS, ATTEST_SIGNING_KEY etc. are in scope.
+# Load root .env so SPM_DONOR_MNEMONIC, PAY_TO_ADDRESS, ATTEST_SIGNING_KEY
+# etc. are in scope.
 if [ -f "$ROOT/.env" ]; then
   set -o allexport
   # shellcheck source=/dev/null
@@ -54,19 +61,25 @@ if [ "$NETWORK" = "mainnet" ]; then
   fi
 fi
 
-# Required for every check below to run for real, not SKIP.
+# Required for every check below to run for real, not SKIP. SPM_ISSUER_URL
+# and SPM_KEY_VALID_FROM (Q13) are public config, not secrets, but the
+# server refuses to boot without them on every network — this script never
+# invents throwaway values for them the way scripts/verify.sh does, so a
+# missing one here is a real .env gap, not something to paper over.
 missing=""
-for var in PAYMENT_ROUTER_APP_ID PAY_TO_ADDRESS SPM_DONOR_MNEMONIC ATTEST_SIGNING_KEY; do
+for var in PAY_TO_ADDRESS SPM_DONOR_MNEMONIC ATTEST_SIGNING_KEY \
+  SPM_ISSUER_URL SPM_KEY_VALID_FROM; do
   if [ -z "${!var:-}" ]; then
     missing="$missing $var"
   fi
 done
 if [ -n "$missing" ]; then
   echo "ERROR: missing required .env value(s):$missing"
-  echo "       Deploy PaymentRouter and rekey payTo first, and set ATTEST_SIGNING_KEY."
+  echo "       Set a funded payTo (PAY_TO_ADDRESS) and ATTEST_SIGNING_KEY."
   exit 1
 fi
-export PAYMENT_ROUTER_APP_ID PAY_TO_ADDRESS SPM_DONOR_MNEMONIC ATTEST_SIGNING_KEY
+export PAY_TO_ADDRESS SPM_DONOR_MNEMONIC ATTEST_SIGNING_KEY \
+  SPM_ISSUER_URL SPM_KEY_VALID_FROM
 
 # Kill any stale proxy on the configured port before starting ours.
 PORT="${PORT:-4873}"
