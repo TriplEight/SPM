@@ -364,6 +364,7 @@ New deployer `DFEMINAMFNQJ23WULKYQN4ARIJAQXU5PJQMPSTWN7PGJQPSW6XEY32ZP54`. Check
 - Nightly credit, batch 1: `CGBHO2HHP3P2YQ442ULUAGT6TYJTGLRHQSNATPPPG2M6NEWINMVQ` (67620547).
 - Claim auditor: `GWJXJRMI767QIEZYU2QAZ2ANK4ULVBDCENJB2PS6JA66SLPWPFCQ` (inner 100,000 → GGDELU…).
 - Claim ops: `ZVQ2RVZ5OG7H3VO6PQXDTJAVVRFMNI7ZZSAVULM5W3CR23VMNHPQ` (inner 150,000 → IRLM4C…).
-- Operator payTo `UXWBBW…` holds step-8 deposits from runs 1–6 (6,000 µUSDC incl. the first 1,000
-  opt-in check); part 2's reconcile records them as `unassigned` ops income.
+- Operator payTo `UXWBBW…` holds 5,000 µUSDC (checked): the step-8 payments of runs 1, 2, 3, 5
+  and 6 (run 4 stopped before paying). Not rekeyed. Part 2's reconcile records them as
+  `unassigned` ops income.
 - Next: R4 part 2 — the persistent TestNet deploy (`spm-test` domain, Compose, anchored review).
