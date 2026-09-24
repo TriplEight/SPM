@@ -324,10 +324,11 @@ After the tracks are merged and `verify.sh` passes:
 4. ASD-STE100 style. Every command must exist in the repository. Every step has a "Check:"
    line.
 5. Remove the WARNING banners from both runbooks.
-6. Backup (decided: sshfs). `SPM_BACKUP_HOST_DIR` is an sshfs mount of the off-host store,
-   owned by uid 1000 (`uid=1000,gid=1000,allow_other`). A drop-in for `spm-nightly.service`
-   sets `RequiresMountsFor=<SPM_BACKUP_HOST_DIR>`. If the mount fails, the job does not start
-   and no credit occurs. Check: unmount the store, start the job, and see that it does not run.
+6. Backup (decided: the host's restic/Backrest plan, no status check in SPM).
+   `SPM_BACKUP_HOST_DIR` is a local directory owned by uid 1000. The Backrest plan includes it,
+   runs daily after the nightly timer (03:17 UTC), excludes `.audit-*.db.tmp`, and alerts the
+   operator on a snapshot error. Check: after one night, the newest `audit-*.db` is in the
+   latest snapshot.
 
 ### Q13. Issuer URL and key date required on every network — DONE c65edd5
 

@@ -913,8 +913,11 @@ from attribution data the handler put on the context (`c.set('attribution', …)
    ledger `settle_txid`s. An unmatched inflow (crash between settle and write, direct deposit)
    is ledgered as `unassigned` ops income. Skip inflows confirmed less than 900 seconds ago
    (`MIN_INFLOW_AGE_SECONDS`).
-2. **Back up.** `VACUUM INTO` a dated copy of the SQLite file and move it off the host. If this
-   fails, stop: do not credit.
+2. **Back up.** `VACUUM INTO` a dated copy of the SQLite file in `BACKUP_DIR`. If this fails,
+   stop: do not credit. The host's own backup (restic) ships `BACKUP_DIR` off the host once a
+   day, after the job. SPM does not check that backup; its error alert goes to the operator.
+   A lost host loses at most one day of attribution. Reconcile rebuilds those inflows as
+   `unassigned` ops income.
 3. **Credit.** If `PAYMENT_ROUTER_APP_ID` is unset or `payTo` is not yet rekeyed, stop here.
    Else put every uncredited accrual into batch `last + 1`, sum auditor entries per
    `(repo, identity)`, and call `credit()` with the crediter key (`CREDITER_MNEMONIC`). Record
@@ -1084,8 +1087,9 @@ usage.
 - **`payTo` key custody before the rekey.** Until the rekey, the `payTo` key can move all USDC.
   Mitigation: the key stays cold and offline and signs only the opt-in and the rekey.
 - **Ledger loss before a credit.** The SQLite file is the only record of which auditor a payment
-  was for. Mitigation: the nightly off-host copy runs before every credit; reconcile can rebuild
-  inflows from the chain, but only as `unassigned` ops income.
+  was for. Mitigation: the nightly local copy runs before every credit, and the host's backup ships
+  it off the host daily; reconcile can rebuild inflows from the chain, but only as `unassigned`
+  ops income.
 - **Crediter trust.** A compromised crediter key can misattribute revenue between the auditor and
   ops balances, bounded by the unallocated balance. It cannot move funds out.
 - **Facilitator boot-guard/route-validation mismatch.** `resolveFeePayer` accepts a
