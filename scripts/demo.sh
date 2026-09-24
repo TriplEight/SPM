@@ -11,10 +11,10 @@
 # rehearsal run — a demo with a fake wallet proves nothing on stage.
 #
 # scripts/e2e.mjs's 250-package on-chain PaymentRouter credit/claim
-# rehearsal (R3, TestNet only) needs CREDITER_MNEMONIC,
-# E2E_AUDITOR_CLAIM_MNEMONIC and E2E_OPS_CLAIM_MNEMONIC in addition to the
-# variables required below — see .env.example. This script never forces
-# those: e2e.mjs SKIPs that one step, by name, when any of them is absent.
+# rehearsal (R3a, TestNet only, hermetic) needs DEPLOYER_MNEMONIC and
+# CREDITER_MNEMONIC in addition to the variables required below — see
+# .env.example. This script never forces those: e2e.mjs SKIPs that one
+# step, by name, when any of them is absent.
 #
 # NETWORK resolution order (read once, before the banner prints):
 #   1. An explicit NETWORK already set in the operator's shell environment

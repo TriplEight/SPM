@@ -12,26 +12,33 @@
 // Exit 0 = every check that ran passed. Exit 1 = at least one check failed.
 // A SKIPPED check never causes a non-zero exit — only a FAILED one does.
 
+import { spawn, spawnSync } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   assertBalanceAtLeastMinClaim,
   assertSignerIsMappedAddress,
   MIN_CLAIM,
+  MIN_CLAIM_FEE,
   readIdentityBalance,
   readMappedAddress,
   submitClaim,
 } from './claim.mjs'
 import { assertSqliteWriteAllowed } from './e2e-guard.mjs'
-import { algodEndpoint, indexerEndpoint, usdcAssetId } from './network.mjs'
+import { algodEndpoint, usdcAssetId } from './network.mjs'
+import { optinAccountToUsdc } from './optin-usdc.mjs'
+import { rekeyPayToToApp } from './rekey-payto.mjs'
 
 // Anchors a CJS `require()` at each workspace package's own node_modules —
 // scripts/ has no node_modules of its own. Mirrors the pattern already
 // established for algosdk imports in this file.
 const requireFromProxy = createRequire(new URL('../proxy/package.json', import.meta.url))
+const requireFromContracts = createRequire(new URL('../contracts/package.json', import.meta.url))
 const algosdk = requireFromProxy('algosdk')
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
@@ -65,7 +72,7 @@ function skip(name, reason) {
   skipped++
 }
 
-// ── On-chain: PaymentRouter 250-package credit/claim rehearsal (R3) ────────
+// ── On-chain: PaymentRouter 250-package credit/claim rehearsal (R3a) ───────
 //
 // One reviewed package's auditor share is 400 microUSDC — far below
 // MIN_CLAIM (100,000, contract.algo.ts). This rehearsal pays for
@@ -76,6 +83,14 @@ function skip(name, reason) {
 // credit.ts) caps a credit() call at 8 foreign references — a shared
 // (repo, identity) collapses 250 packages into exactly one auditor entry.
 //
+// Hermetic (R3a): every run deploys its own fresh PaymentRouter app for
+// fresh, in-memory payTo/auditor/ops accounts, and runs a dedicated proxy
+// process against its own throwaway SQLite database. PaymentRouter's
+// credit() accepts only batchSeq == on-chain last + 1 (one app, one
+// ledger) — reusing a persistent app and payTo across runs made every run
+// after the first FAIL on batch numbering. A fresh app has no other
+// inflow, so this run's own totals are exact, not merely a lower bound.
+//
 // TestNet only (SPEC §17: never manufacture MainNet volume) — gated by
 // onChainRehearsalSkipReason, unit-tested in scripts/e2e.test.mjs.
 
@@ -84,17 +99,12 @@ const ONCHAIN_REPO = 'npm:spm-e2e-rehearsal'
 const ONCHAIN_REVIEWER_LOGIN = 'spm-e2e-auditor'
 const ONCHAIN_IDENTITY = `github:${ONCHAIN_REVIEWER_LOGIN}`
 const ONCHAIN_OPS_IDENTITY = 'ops'
-// SPEC §13.2 auditor share: 400 per 1,000 microUSDC paid.
-const ONCHAIN_AUDITOR_SHARE_MICRO = (ONCHAIN_ENTRY_COUNT * 1_000 * 400) / 1_000
+// SPEC §13.2 MVP split: 400 auditor / 600 ops per 1,000 microUSDC paid.
+const ONCHAIN_TOTAL_MICRO = ONCHAIN_ENTRY_COUNT * 1_000
+const ONCHAIN_AUDITOR_SHARE_MICRO = (ONCHAIN_TOTAL_MICRO * 400) / 1_000
+const ONCHAIN_OPS_SHARE_MICRO = ONCHAIN_TOTAL_MICRO - ONCHAIN_AUDITOR_SHARE_MICRO
 
-const ONCHAIN_REQUIRED_ENV_VARS = [
-  'PAYMENT_ROUTER_APP_ID',
-  'PAY_TO_ADDRESS',
-  'CREDITER_MNEMONIC',
-  'SPM_DONOR_MNEMONIC',
-  'E2E_AUDITOR_CLAIM_MNEMONIC',
-  'E2E_OPS_CLAIM_MNEMONIC',
-]
+const ONCHAIN_REQUIRED_ENV_VARS = ['DEPLOYER_MNEMONIC', 'CREDITER_MNEMONIC', 'SPM_DONOR_MNEMONIC']
 
 /**
  * Why the 250-package on-chain rehearsal does not run, or null when it
@@ -116,6 +126,105 @@ export function onChainRehearsalSkipReason(network, env) {
     return `missing env var(s): ${missing.join(', ')}`
   }
   return null
+}
+
+// ── Funding amounts (R3a) ───────────────────────────────────────────────
+//
+// The deployer pays for every fresh account's minimum balance and fees, in
+// one run: payTo (opt-in + rekey), the auditor claimant (opt-in + claim),
+// the ops claimant (opt-in + claim), the app account's own box MBR, and
+// the deploy call fees themselves.
+
+const ACCOUNT_MBR_MICRO_ALGO = 100_000
+const ASSET_MBR_MICRO_ALGO = 100_000
+const STANDARD_FEE_MICRO_ALGO = 1_000
+// Mirrors deploy-config.ts's own APP_ACCOUNT_FUNDING (box MBR for the
+// balances/identityAddress boxes the deploy step creates).
+const APP_ACCOUNT_FUNDING_MICRO_ALGO = 1_000_000
+// createApplication + setCrediter + 2x setIdentity, with margin for a fee
+// bump between rounds.
+const DEPLOY_CALL_FEES_MICRO_ALGO = 10_000
+// One funding payment each to payTo, the auditor claimant, the ops
+// claimant, and the app account.
+const FUNDING_TXN_FEES_MICRO_ALGO = STANDARD_FEE_MICRO_ALGO * 4
+// Keeps the deployer's own MBR intact after every send in the run.
+const DEPLOYER_RESERVE_MICRO_ALGO = 100_000
+
+/** MBR + one ASA opt-in's MBR increase + the opt-in fee + the rekey fee. */
+export function payToFundingMicroAlgo() {
+  return ACCOUNT_MBR_MICRO_ALGO + ASSET_MBR_MICRO_ALGO + STANDARD_FEE_MICRO_ALGO * 2
+}
+
+/** MBR + one ASA opt-in's MBR increase + the opt-in fee + claim()'s own outer-fee floor. */
+export function claimantFundingMicroAlgo() {
+  return ACCOUNT_MBR_MICRO_ALGO + ASSET_MBR_MICRO_ALGO + STANDARD_FEE_MICRO_ALGO + MIN_CLAIM_FEE
+}
+
+/** The deployer's own required ALGO balance for one whole rehearsal run. */
+export function deployerFundingTotalMicroAlgo() {
+  return (
+    payToFundingMicroAlgo() +
+    claimantFundingMicroAlgo() * 2 + // the auditor claimant and the ops claimant
+    APP_ACCOUNT_FUNDING_MICRO_ALGO +
+    DEPLOY_CALL_FEES_MICRO_ALGO +
+    FUNDING_TXN_FEES_MICRO_ALGO +
+    DEPLOYER_RESERVE_MICRO_ALGO
+  )
+}
+
+/**
+ * Refuses when the deployer cannot fund payTo, both claimants, the app
+ * account, and the deploy itself. Pure: no network access.
+ *
+ * @param {number} deployerBalanceMicroAlgo
+ * @param {number} [requiredMicroAlgo]
+ */
+export function assertDeployerFunded(
+  deployerBalanceMicroAlgo,
+  requiredMicroAlgo = deployerFundingTotalMicroAlgo(),
+) {
+  if (deployerBalanceMicroAlgo < requiredMicroAlgo) {
+    throw new Error(
+      `deployer holds ${deployerBalanceMicroAlgo} microALGO, needs at least ${requiredMicroAlgo} ` +
+        'to fund payTo, the auditor and ops claimants, and deploy a fresh PaymentRouter',
+    )
+  }
+}
+
+/**
+ * Refuses when the donor cannot pay for the whole ONCHAIN_ENTRY_COUNT-package
+ * lockfile. Pure: no network access.
+ *
+ * @param {number} donorBalanceMicroUsdc
+ */
+export function assertDonorFundedForRehearsal(donorBalanceMicroUsdc) {
+  if (donorBalanceMicroUsdc < ONCHAIN_TOTAL_MICRO) {
+    throw new Error(
+      `donor holds ${donorBalanceMicroUsdc} microUSDC, needs at least ${ONCHAIN_TOTAL_MICRO} ` +
+        `to pay for the ${ONCHAIN_ENTRY_COUNT}-package lockfile`,
+    )
+  }
+}
+
+/**
+ * Refuses when any two of the deployer, crediter, and donor resolve to the
+ * same address — the crediter key must never double as a cold key
+ * (spm-payment-router skill), and a self-funding donor would make the
+ * "donor holds enough USDC" precondition meaningless. Pure: no network
+ * access.
+ *
+ * @param {{deployerAddress: string, crediterAddress: string, donorAddress: string}} addrs
+ */
+export function assertRehearsalKeysDistinct({ deployerAddress, crediterAddress, donorAddress }) {
+  if (crediterAddress === deployerAddress) {
+    throw new Error('CREDITER_MNEMONIC must not resolve to the same address as DEPLOYER_MNEMONIC')
+  }
+  if (deployerAddress === donorAddress) {
+    throw new Error('DEPLOYER_MNEMONIC must not resolve to the same address as SPM_DONOR_MNEMONIC')
+  }
+  if (crediterAddress === donorAddress) {
+    throw new Error('CREDITER_MNEMONIC must not resolve to the same address as SPM_DONOR_MNEMONIC')
+  }
 }
 
 /**
@@ -191,221 +300,465 @@ async function claimOnChain(algod, appId, identity, account, payToAddress, asset
   console.log(`    Lora: ${loraUrl(txid)}`)
 }
 
+/** A plain ALGO payment from `funderAccount` to `recipientAddress`. Returns the confirmed txid. */
+async function fundAccount(algod, funderAccount, recipientAddress, amountMicroAlgo) {
+  const sp = await algod.getTransactionParams().do()
+  const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+    sender: funderAccount.addr.toString(),
+    receiver: recipientAddress,
+    amount: amountMicroAlgo,
+    suggestedParams: sp,
+  })
+  const signed = txn.signTxn(funderAccount.sk)
+  const { txid } = await algod.sendRawTransaction(signed).do()
+  await algosdk.waitForConfirmation(algod, txid, 6)
+  return txid
+}
+
+/** An unused, OS-assigned TCP port on localhost, for the dedicated rehearsal proxy. */
+function findFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer()
+    server.unref()
+    server.on('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address()
+      server.close(() => resolve(port))
+    })
+  })
+}
+
+function resolveTsxBin() {
+  for (const dir of ['mcp', 'proxy', 'cli']) {
+    const bin = path.join(scriptDir, '..', dir, 'node_modules', '.bin', 'tsx')
+    if (fs.existsSync(bin)) return bin
+  }
+  throw new Error(
+    'no tsx binary found under proxy/, mcp/, or cli/ node_modules — set up dependencies with pnpm',
+  )
+}
+
 /**
- * Runs the 250-package on-chain rehearsal: seeds the fixture rows, pays
- * for the lockfile via the real MCP attest_lockfile tool, runs the nightly
- * job against the already-open throwaway SQLite database, then claims both
- * identities. Every sub-step is its own `check()`, so a failure here is a
- * FAIL with the exact assertion that broke — never a silent skip and never
- * a false PASS. Preconditions run first and, on failure, stop the whole
- * rehearsal (no further check ever claims a PASS it did not earn).
+ * Runs `relativeScript` (inside `cwd`) to completion via `tsxBin`, with an
+ * explicit env object only — never the operator's root .env (R3a Result
+ * 2: a child process must never inherit a real donor or crediter key
+ * through the shell's own environment or a `--env-file` flag). Throws with
+ * the combined stdout/stderr on a non-zero exit.
+ */
+function runTsxScript(tsxBin, cwd, relativeScript, env) {
+  const result = spawnSync(tsxBin, [relativeScript], { cwd, env, encoding: 'utf8' })
+  if (result.status !== 0) {
+    throw new Error(
+      `${relativeScript} exited ${result.status}: ${result.stdout ?? ''}${result.stderr ?? ''}`,
+    )
+  }
+  return result.stdout ?? ''
+}
+
+/**
+ * Starts a dedicated proxy process for the rehearsal, with an explicit env
+ * object only (see runTsxScript's own warning). Returns the running child
+ * process; the caller stops it in a finally block (stopRehearsalProxy).
+ */
+function startRehearsalProxy(tsxBin, proxyDir, env) {
+  const child = spawn(tsxBin, ['src/index.ts'], {
+    cwd: proxyDir,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let output = ''
+  child.stdout.on('data', (chunk) => {
+    output += chunk
+  })
+  child.stderr.on('data', (chunk) => {
+    output += chunk
+  })
+  child.rehearsalOutput = () => output
+  return child
+}
+
+async function waitForRehearsalProxyReady(url, child, timeoutMs = 30_000) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    if (child.exitCode !== null) {
+      throw new Error(
+        `rehearsal proxy exited early (code ${child.exitCode}): ${child.rehearsalOutput()}`,
+      )
+    }
+    try {
+      const res = await fetch(`${url}/api/v1/status/ping/1.0.0`)
+      if (res.ok) return
+    } catch {
+      // not ready yet
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300))
+  }
+  throw new Error(`rehearsal proxy at ${url} never became ready: ${child.rehearsalOutput()}`)
+}
+
+function stopRehearsalProxy(child) {
+  if (!child || child.exitCode !== null) return
+  child.kill('SIGTERM')
+}
+
+/**
+ * The dedicated rehearsal proxy's own env — explicit keys only, so it can
+ * never see DEPLOYER_MNEMONIC, CREDITER_MNEMONIC, SPM_DONOR_MNEMONIC, or
+ * the root .env (R3a Result 2). SPM_ISSUER_URL uses an RFC 2606 reserved
+ * domain (Q13 — the server refuses to boot without one on every network),
+ * mirroring scripts/verify.sh's own rehearsal config.
+ */
+function buildRehearsalProxyEnv({ port, sqlitePath, payToAddress, attestSigningKey }) {
+  return {
+    PATH: process.env.PATH ?? '',
+    HOME: process.env.HOME ?? '',
+    NETWORK: 'testnet',
+    PORT: String(port),
+    SQLITE_PATH: sqlitePath,
+    PAY_TO_ADDRESS: payToAddress,
+    ATTEST_SIGNING_KEY: attestSigningKey,
+    SPM_ISSUER_URL: 'https://spm-e2e-rehearsal.invalid',
+    SPM_KEY_VALID_FROM: '2026-01-01T00:00:00Z',
+    FACILITATOR_URL: process.env.FACILITATOR_URL ?? 'https://facilitator.goplausible.xyz',
+    ALGOD_SERVER: process.env.ALGOD_SERVER ?? 'https://testnet-api.algonode.cloud',
+    ALGOD_PORT: process.env.ALGOD_PORT ?? '443',
+    ALGOD_TOKEN: process.env.ALGOD_TOKEN ?? '',
+  }
+}
+
+/** The fixture-seeding subprocess's own env: only enough to open the rehearsal DB. */
+function buildRehearsalSeedEnv({ sqlitePath }) {
+  return { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', SQLITE_PATH: sqlitePath }
+}
+
+/**
+ * The nightly-job subprocess's own env. Carries CREDITER_MNEMONIC (the one
+ * secret this step needs) but never DEPLOYER_MNEMONIC or
+ * SPM_DONOR_MNEMONIC — and never the root .env (R3a Result 2: this
+ * replaces `pnpm -C proxy nightly`, whose own npm script runs
+ * `node --env-file=../.env`).
+ */
+function buildRehearsalNightlyEnv({ sqlitePath, payToAddress, appId, backupDir }) {
+  return {
+    PATH: process.env.PATH ?? '',
+    HOME: process.env.HOME ?? '',
+    NETWORK: 'testnet',
+    SQLITE_PATH: sqlitePath,
+    PAY_TO_ADDRESS: payToAddress,
+    PAYMENT_ROUTER_APP_ID: String(appId),
+    CREDITER_MNEMONIC: process.env.CREDITER_MNEMONIC,
+    ALGOD_SERVER: process.env.ALGOD_SERVER ?? 'https://testnet-api.algonode.cloud',
+    ALGOD_PORT: process.env.ALGOD_PORT ?? '443',
+    ALGOD_TOKEN: process.env.ALGOD_TOKEN ?? '',
+    INDEXER_URL: process.env.INDEXER_URL ?? 'https://testnet-idx.algonode.cloud',
+    BACKUP_DIR: backupDir,
+  }
+}
+
+/**
+ * Writes a throwaway seed script that reuses proxy/src/status.js's own
+ * review-status setter and e2e-guard.mjs's own assertSqliteWriteAllowed()
+ * (never a second, hand-rolled write path) to seed `entries` as
+ * COMMUNITY_REVIEWED rows. Runs as its own subprocess (its own
+ * SQLITE_PATH), because proxy/src/db.js binds to whatever SQLITE_PATH was
+ * set at its first import in a process (ESM module caching) — and this
+ * process already imported it once, for the main proxy's own SQLITE_PATH,
+ * earlier in main(). Returns the script's path.
+ */
+function writeSeedFixturesScript(entries, reviewerLogin, repo) {
+  const rows = entries.map((e) => ({ name: e.name, version: e.version, integrity: e.integrity }))
+  const statusHref = pathToFileURL(path.join(scriptDir, '..', 'proxy', 'src', 'status.ts')).href
+  const guardHref = pathToFileURL(path.join(scriptDir, 'e2e-guard.mjs')).href
+  const body = `import { setStatus } from ${JSON.stringify(statusHref)}
+import { assertSqliteWriteAllowed } from ${JSON.stringify(guardHref)}
+
+assertSqliteWriteAllowed(process.env.SQLITE_PATH)
+
+const rows = ${JSON.stringify(rows)}
+for (const row of rows) {
+  /* guard-allow: RULE9 — the on-chain rehearsal's own throwaway-SQLITE_PATH fixture write, gated by assertSqliteWriteAllowed() above */ setStatus(
+    row.name,
+    row.version,
+    'COMMUNITY_REVIEWED',
+    'E2E_ONCHAIN_AUDITOR',
+    'E2E_ONCHAIN_TXID',
+    row.integrity,
+    ${JSON.stringify(reviewerLogin)},
+    null,
+    ${JSON.stringify(repo)},
+  )
+}
+console.log(\`seeded \${rows.length} rehearsal fixture rows\`)
+`
+  const scriptPath = path.join(tmpDir, 'seed-rehearsal-fixtures.mjs')
+  fs.writeFileSync(scriptPath, body)
+  return scriptPath
+}
+
+/** Runs the nightly job (proxy/src/claims/nightly-main.ts) as its own subprocess. */
+function runNightlySubprocess(tsxBin, proxyDir, env) {
+  return runTsxScript(tsxBin, proxyDir, 'src/claims/nightly-main.ts', env)
+}
+
+/**
+ * Runs the 250-package on-chain rehearsal (R3a): generates fresh in-memory
+ * payTo/auditor/ops accounts, funds and opts each in, deploys a fresh
+ * PaymentRouter, rekeys payTo, starts a dedicated proxy process on its own
+ * throwaway SQLite database, seeds the fixture rows into that database
+ * only, pays for the lockfile via the real MCP attest_lockfile tool, runs
+ * the nightly job, and claims both identities. Every sub-step is its own
+ * `check()`, so a failure here is a FAIL with the exact assertion that
+ * broke — never a silent skip and never a false PASS. Preconditions run
+ * first and, on failure, stop the whole rehearsal. The dedicated proxy is
+ * always stopped, even on failure (finally block).
  */
 async function runOnChainRehearsal(loraUrl) {
-  const { setStatus } = await import('../proxy/src/status.js')
-  const dbModule = await import('../proxy/src/db.js')
-  const db = dbModule.default
   const { PRICE_PER_REVIEWED_PACKAGE_MICRO } = await import('../proxy/src/routes/attest.js')
-  const { runNightly } = await import('../proxy/src/claims/nightly.js')
-  const { backupDatabase } = await import('../proxy/src/claims/backup.js')
-  const { buildAlgodCreditClient } = await import('../proxy/src/claims/credit.js')
-  const { createIndexerClient } = await import('../proxy/src/claims/indexer.js')
-  const { attestLockfileTool } = await import('../mcp/src/tools/attest.js')
-
   const priceMicro = ONCHAIN_ENTRY_COUNT * PRICE_PER_REVIEWED_PACKAGE_MICRO
+
   const usdcAsaId = BigInt(usdcAssetId('testnet'))
   const { server, port, token } = algodEndpoint('testnet')
   const algod = new algosdk.Algodv2(token, server, port)
-  const appId = BigInt(process.env.PAYMENT_ROUTER_APP_ID)
-  const payToAddress = process.env.PAY_TO_ADDRESS
-  const auditorAccount = algosdk.mnemonicToSecretKey(process.env.E2E_AUDITOR_CLAIM_MNEMONIC)
-  const opsAccount = algosdk.mnemonicToSecretKey(process.env.E2E_OPS_CLAIM_MNEMONIC)
 
-  const preconditionsOk = await check('on-chain: 250-pkg rehearsal preconditions', async () => {
-    const appAddress = algosdk.getApplicationAddress(appId).toString()
-    const payToInfo = await algod.accountInformation(payToAddress).do()
-    if (payToInfo.authAddr?.toString() !== appAddress) {
-      throw new Error(
-        `payTo (${payToAddress}) is not rekeyed to PaymentRouter app ${appId} — ` +
-          'run scripts/rekey-payto.mjs first',
-      )
-    }
+  const deployerAccount = algosdk.mnemonicToSecretKey(process.env.DEPLOYER_MNEMONIC)
+  const crediterAccount = algosdk.mnemonicToSecretKey(process.env.CREDITER_MNEMONIC)
+  const donorAccount = algosdk.mnemonicToSecretKey(process.env.SPM_DONOR_MNEMONIC)
 
-    const auditorMapped = await readMappedAddress(algod, appId, ONCHAIN_IDENTITY)
-    if (auditorMapped !== auditorAccount.addr.toString()) {
-      throw new Error(
-        `identity "${ONCHAIN_IDENTITY}" is not mapped to E2E_AUDITOR_CLAIM_MNEMONIC's address ` +
-          `(${auditorAccount.addr}); an admin must call setIdentity("${ONCHAIN_IDENTITY}", ...) first`,
-      )
-    }
-    const opsMapped = await readMappedAddress(algod, appId, ONCHAIN_OPS_IDENTITY)
-    if (opsMapped !== opsAccount.addr.toString()) {
-      throw new Error(
-        'identity "ops" is not mapped to E2E_OPS_CLAIM_MNEMONIC\'s address ' +
-          `(${opsAccount.addr}); an admin must call setIdentity("ops", ...) first`,
-      )
-    }
+  // Fresh, in-memory-only accounts — never written to disk or logged; only
+  // their addresses are printed.
+  const payToAccount = algosdk.generateAccount()
+  const auditorAccount = algosdk.generateAccount()
+  const opsAccount = algosdk.generateAccount()
+  console.log(`  (rehearsal payTo: ${payToAccount.addr})`)
+  console.log(`  (rehearsal auditor claimant: ${auditorAccount.addr})`)
+  console.log(`  (rehearsal ops claimant: ${opsAccount.addr})`)
 
-    const donorAddress = algosdk.mnemonicToSecretKey(process.env.SPM_DONOR_MNEMONIC).addr.toString()
-    const donorBalance = await usdcHolding(algod, donorAddress, usdcAsaId)
-    if (donorBalance < priceMicro) {
-      throw new Error(
-        `donor (${donorAddress}) holds ${donorBalance} microUSDC, needs at least ` +
-          `${priceMicro} to pay for the ${ONCHAIN_ENTRY_COUNT}-package lockfile`,
-      )
-    }
+  const preconditionsOk = await check('on-chain: hermetic rehearsal preconditions', async () => {
+    assertRehearsalKeysDistinct({
+      deployerAddress: deployerAccount.addr.toString(),
+      crediterAddress: crediterAccount.addr.toString(),
+      donorAddress: donorAccount.addr.toString(),
+    })
+    const deployerInfo = await algod.accountInformation(deployerAccount.addr.toString()).do()
+    assertDeployerFunded(Number(deployerInfo.amount))
+    const donorBalance = await usdcHolding(algod, donorAccount.addr.toString(), usdcAsaId)
+    assertDonorFundedForRehearsal(donorBalance)
   })
   if (!preconditionsOk) return
 
-  const fixtureEntries = loadOnChainFixtureEntries()
-  // WARNING: the same guard e2e.mjs's own single fixture row uses above —
-  // this must never write to a real database (CLAUDE.md invariant 5).
-  assertSqliteWriteAllowed(process.env.SQLITE_PATH)
-  for (const entry of fixtureEntries) {
-    /* guard-allow: RULE9 — e2e.mjs's own throwaway-SQLITE_PATH fixture write, gated by assertSqliteWriteAllowed() above */ setStatus(
-      entry.name,
-      entry.version,
-      'COMMUNITY_REVIEWED',
-      'E2E_ONCHAIN_AUDITOR',
-      'E2E_ONCHAIN_TXID',
-      entry.integrity,
-      ONCHAIN_REVIEWER_LOGIN,
-      null,
-      ONCHAIN_REPO,
-    )
-  }
+  const tsxBin = resolveTsxBin()
+  const proxyDir = path.join(scriptDir, '..', 'proxy')
+  let rehearsalProxy
+  try {
+    const fundOk = await check('on-chain: fund and opt in payTo/auditor/ops', async () => {
+      await fundAccount(
+        algod,
+        deployerAccount,
+        payToAccount.addr.toString(),
+        payToFundingMicroAlgo(),
+      )
+      await optinAccountToUsdc({ algod, network: 'testnet', account: payToAccount })
+      await fundAccount(
+        algod,
+        deployerAccount,
+        auditorAccount.addr.toString(),
+        claimantFundingMicroAlgo(),
+      )
+      await optinAccountToUsdc({ algod, network: 'testnet', account: auditorAccount })
+      await fundAccount(
+        algod,
+        deployerAccount,
+        opsAccount.addr.toString(),
+        claimantFundingMicroAlgo(),
+      )
+      await optinAccountToUsdc({ algod, network: 'testnet', account: opsAccount })
+    })
+    if (!fundOk) return
 
-  const lockfilePath = path.join(tmpDir, 'onchain-package-lock.json')
-  fs.writeFileSync(lockfilePath, buildOnChainLockfileBytes(fixtureEntries))
+    let appId
+    const deployOk = await check('on-chain: deploy fresh PaymentRouter', async () => {
+      const { deployPaymentRouter } = await import(
+        '../contracts/smart_contracts/payment_router/deploy-config.js'
+      )
+      const { AlgorandClient } = requireFromContracts('@algorandfoundation/algokit-utils')
+      const algorand = AlgorandClient.testNet()
+      const deployerSigner = await algorand.account.fromEnvironment('DEPLOYER')
+      const identityMap = new Map([
+        [ONCHAIN_IDENTITY, auditorAccount.addr.toString()],
+        [ONCHAIN_OPS_IDENTITY, opsAccount.addr.toString()],
+      ])
+      const result = await deployPaymentRouter({
+        algorand,
+        network: 'testnet',
+        deployer: deployerSigner,
+        crediterAddress: crediterAccount.addr.toString(),
+        payToAddress: payToAccount.addr.toString(),
+        identityMap,
+      })
+      appId = result.appId
+      return `app ${appId}`
+    })
+    if (!deployOk) return
 
-  let paymentTxid
-  const paymentOk = await check(
-    `on-chain: ${ONCHAIN_ENTRY_COUNT}-pkg lockfile payment (${priceMicro} microUSDC)`,
-    async () => {
-      const result = await attestLockfileTool.handler({ lockfilePath, allowDonation: true })
-      if (result.status !== 'attested') {
-        throw new Error(`expected attested, got ${result.status}`)
-      }
-      if (result.summary?.reviewed !== ONCHAIN_ENTRY_COUNT) {
-        throw new Error(`expected ${ONCHAIN_ENTRY_COUNT} reviewed, got ${result.summary?.reviewed}`)
-      }
-      const settled = db
-        .prepare('SELECT DISTINCT settle_txid FROM accruals WHERE repo = ?')
-        .all(ONCHAIN_REPO)
-      if (settled.length !== 1) {
-        throw new Error(
-          `expected exactly one settlement txid for repo ${ONCHAIN_REPO}, got ${settled.length}`,
-        )
-      }
-      paymentTxid = settled[0].settle_txid
-      console.log(`\n    Settlement: ${paymentTxid}`)
-      console.log(`    Lora: ${loraUrl(paymentTxid)}`)
-    },
-  )
-  if (!paymentOk) return
+    const rekeyOk = await check('on-chain: rekey fresh payTo to PaymentRouter', async () => {
+      const txid = await rekeyPayToToApp({ algod, network: 'testnet', payToAccount, appId })
+      console.log(`\n    Rekey: ${txid}`)
+      console.log(`    Lora: ${loraUrl(txid)}`)
+    })
+    if (!rekeyOk) return
 
-  let auditorBeforeClaim
-  let opsBeforeClaim
-  const creditOk = await check('on-chain: nightly credit (250-pkg batch)', async () => {
-    const auditorBefore = await readIdentityBalance(algod, appId, ONCHAIN_IDENTITY)
-    const opsBefore = await readIdentityBalance(algod, appId, ONCHAIN_OPS_IDENTITY)
+    const rehearsalPort = await findFreePort()
+    const rehearsalSqlitePath = path.join(tmpDir, 'rehearsal.db')
+    const rehearsalBackupDir = path.join(tmpDir, 'nightly-backup')
+    const rehearsalProxyUrl = `http://localhost:${rehearsalPort}`
+    const attestSigningKey = randomBytes(32).toString('hex')
 
-    const { server: indexerUrl } = indexerEndpoint('testnet')
-    const indexer = createIndexerClient(indexerUrl, String(usdcAsaId))
-    const creditClient = buildAlgodCreditClient(
-      algod,
-      indexer,
-      process.env.CREDITER_MNEMONIC,
-      payToAddress,
-      usdcAsaId,
-    )
-    const backupDir = path.join(tmpDir, 'nightly-backup')
+    const proxyStartOk = await check('on-chain: start rehearsal proxy', async () => {
+      const env = buildRehearsalProxyEnv({
+        port: rehearsalPort,
+        sqlitePath: rehearsalSqlitePath,
+        payToAddress: payToAccount.addr.toString(),
+        attestSigningKey,
+      })
+      rehearsalProxy = startRehearsalProxy(tsxBin, proxyDir, env)
+      await waitForRehearsalProxyReady(rehearsalProxyUrl, rehearsalProxy)
+      return rehearsalProxyUrl
+    })
+    if (!proxyStartOk) return
 
-    const logLines = []
-    await runNightly({
-      indexer,
-      backup: () => backupDatabase(db, backupDir),
-      creditClient,
-      env: process.env,
-      log: (line) => {
-        logLines.push(line)
-        console.log(`    ${line}`)
+    const fixtureEntries = loadOnChainFixtureEntries()
+    const seedOk = await check('on-chain: seed 250 rehearsal fixture rows', () => {
+      const scriptPath = writeSeedFixturesScript(
+        fixtureEntries,
+        ONCHAIN_REVIEWER_LOGIN,
+        ONCHAIN_REPO,
+      )
+      const env = buildRehearsalSeedEnv({ sqlitePath: rehearsalSqlitePath })
+      return runTsxScript(tsxBin, scriptDir, scriptPath, env).trim()
+    })
+    if (!seedOk) return
+
+    const lockfilePath = path.join(tmpDir, 'onchain-package-lock.json')
+    fs.writeFileSync(lockfilePath, buildOnChainLockfileBytes(fixtureEntries))
+
+    // mcp/src/tools/attest.js's own PROXY_URL constant bakes in at its
+    // first-ever import in this process — set SPM_PROXY_URL to the
+    // rehearsal proxy before that import ever runs, so it targets the
+    // dedicated rehearsal proxy, never the main e2e proxy from earlier in
+    // this file (a different module, mcp/src/tools/install.js, already
+    // baked in that one in §8 above).
+    process.env.SPM_PROXY_URL = rehearsalProxyUrl
+    const { attestLockfileTool } = await import('../mcp/src/tools/attest.js')
+
+    const paymentOk = await check(
+      `on-chain: ${ONCHAIN_ENTRY_COUNT}-pkg lockfile payment (${priceMicro} microUSDC)`,
+      async () => {
+        const result = await attestLockfileTool.handler({ lockfilePath, allowDonation: true })
+        if (result.status !== 'attested') {
+          throw new Error(`expected attested, got ${result.status}`)
+        }
+        if (result.summary?.reviewed !== ONCHAIN_ENTRY_COUNT) {
+          throw new Error(
+            `expected ${ONCHAIN_ENTRY_COUNT} reviewed, got ${result.summary?.reviewed}`,
+          )
+        }
       },
+    )
+    if (!paymentOk) return
+
+    const nightlyEnv = buildRehearsalNightlyEnv({
+      sqlitePath: rehearsalSqlitePath,
+      payToAddress: payToAccount.addr.toString(),
+      appId,
+      backupDir: rehearsalBackupDir,
     })
 
-    const creditLine = logLines.find((line) => line.includes('spm-nightly: credited batch'))
-    if (!creditLine) {
-      throw new Error(`nightly job did not credit a batch: ${logLines.join(' | ')}`)
-    }
-    const match = /credited batch (\d+), txid (\S+)/.exec(creditLine)
-    if (!match) throw new Error(`could not parse batch/txid from: ${creditLine}`)
-    const batchSeq = Number(match[1])
-    const creditTxid = match[2]
-    console.log(`    Lora: ${loraUrl(creditTxid)}`)
+    let batchSeq
+    const creditOk = await check('on-chain: nightly credit (250-pkg batch)', () => {
+      const output = runNightlySubprocess(tsxBin, proxyDir, nightlyEnv)
+      for (const line of output.split('\n')) {
+        if (line.trim()) console.log(`    ${line.trim()}`)
+      }
+      const match = /credited batch (\d+), txid (\S+)/.exec(output)
+      if (!match) throw new Error(`nightly job did not credit a batch: ${output}`)
+      batchSeq = Number(match[1])
+      const creditTxid = match[2]
+      if (batchSeq !== 1) {
+        throw new Error(`expected batch 1 on a fresh app, got batch ${batchSeq}`)
+      }
+      console.log(`    Lora: ${loraUrl(creditTxid)}`)
+    })
+    if (!creditOk) return
 
-    const batchRow = db
-      .prepare(
-        'SELECT attributed_micro, unattributed_micro, credit_txid FROM batches WHERE batch_seq = ?',
-      )
-      .get(batchSeq)
-    if (!batchRow?.credit_txid) {
-      throw new Error(`batch ${batchSeq} has no recorded credit_txid`)
-    }
+    let auditorBalance
+    let opsBalance
+    const balancesOk = await check(
+      'on-chain: fresh app balances match the 250-pkg batch exactly',
+      async () => {
+        const BetterSqlite3 = requireFromProxy('better-sqlite3')
+        const rehearsalDb = new BetterSqlite3(rehearsalSqlitePath, { readonly: true })
+        let batchRow
+        try {
+          batchRow = rehearsalDb
+            .prepare(
+              'SELECT attributed_micro, unattributed_micro, credit_txid FROM batches WHERE batch_seq = ?',
+            )
+            .get(batchSeq)
+        } finally {
+          rehearsalDb.close()
+        }
+        if (!batchRow?.credit_txid) {
+          throw new Error(`batch ${batchSeq} has no recorded credit_txid`)
+        }
 
-    const ourAuditorShare =
-      db
-        .prepare(
-          "SELECT SUM(amount_micro) as total FROM accruals WHERE role = 'auditor' AND identity = ? AND repo = ?",
-        )
-        .get(ONCHAIN_IDENTITY.toLowerCase(), ONCHAIN_REPO)?.total ?? 0
-    if (ourAuditorShare !== ONCHAIN_AUDITOR_SHARE_MICRO) {
-      throw new Error(
-        `fixture ledger rows sum to ${ourAuditorShare} microUSDC for the auditor role, ` +
-          `expected ${ONCHAIN_AUDITOR_SHARE_MICRO}`,
-      )
-    }
+        auditorBalance = await readIdentityBalance(algod, appId, ONCHAIN_IDENTITY)
+        opsBalance = await readIdentityBalance(algod, appId, ONCHAIN_OPS_IDENTITY)
+        if (auditorBalance !== ONCHAIN_AUDITOR_SHARE_MICRO) {
+          throw new Error(
+            `auditor balance is ${auditorBalance}, expected exactly ${ONCHAIN_AUDITOR_SHARE_MICRO}`,
+          )
+        }
+        if (opsBalance !== ONCHAIN_OPS_SHARE_MICRO) {
+          throw new Error(
+            `ops balance is ${opsBalance}, expected exactly ${ONCHAIN_OPS_SHARE_MICRO}`,
+          )
+        }
+      },
+    )
+    if (!balancesOk) return
 
-    // ops's on-chain share is 60% of this batch's whole attributed total,
-    // plus any unattributed total (contract.algo.ts's credit(): opsAmount =
-    // attributedTotal - entriesTotal + unattributedTotal, and entries[]
-    // always sums to exactly 40% of attributedTotal regardless of how many
-    // distinct auditor identities it is split across). Computed from the
-    // batch this run actually created, not hardcoded to our own 250-package
-    // contribution alone: the same batch may also carry an earlier check's
-    // settled payment (§8 above, when SPM_DONOR_MNEMONIC is set) or a
-    // reconciled historical inflow on this persistent TestNet payTo.
-    const expectedOpsDelta =
-      Math.trunc((batchRow.attributed_micro * 600) / 1000) + batchRow.unattributed_micro
+    console.log(
+      `  (auditor balance before claim: ${auditorBalance} microUSDC — at least MIN_CLAIM ${MIN_CLAIM})`,
+    )
+    console.log(
+      `  (ops balance before claim: ${opsBalance} microUSDC — at least MIN_CLAIM ${MIN_CLAIM})`,
+    )
 
-    const auditorAfter = await readIdentityBalance(algod, appId, ONCHAIN_IDENTITY)
-    const opsAfter = await readIdentityBalance(algod, appId, ONCHAIN_OPS_IDENTITY)
-    const auditorDelta = auditorAfter - auditorBefore
-    const opsDelta = opsAfter - opsBefore
-    if (auditorDelta !== ONCHAIN_AUDITOR_SHARE_MICRO) {
-      throw new Error(
-        `auditor balance grew by ${auditorDelta}, expected ${ONCHAIN_AUDITOR_SHARE_MICRO}`,
-      )
-    }
-    if (opsDelta !== expectedOpsDelta) {
-      throw new Error(`ops balance grew by ${opsDelta}, expected ${expectedOpsDelta}`)
-    }
-    auditorBeforeClaim = auditorAfter
-    opsBeforeClaim = opsAfter
-  })
-  if (!creditOk) return
-
-  console.log(
-    `  (auditor balance before claim: ${auditorBeforeClaim} microUSDC — at least MIN_CLAIM ${MIN_CLAIM})`,
-  )
-  console.log(
-    `  (ops balance before claim: ${opsBeforeClaim} microUSDC — at least MIN_CLAIM ${MIN_CLAIM})`,
-  )
-
-  await check(`on-chain: claim (${ONCHAIN_IDENTITY})`, () =>
-    claimOnChain(algod, appId, ONCHAIN_IDENTITY, auditorAccount, payToAddress, usdcAsaId, loraUrl),
-  )
-  await check('on-chain: claim (ops)', () =>
-    claimOnChain(algod, appId, ONCHAIN_OPS_IDENTITY, opsAccount, payToAddress, usdcAsaId, loraUrl),
-  )
+    await check(`on-chain: claim (${ONCHAIN_IDENTITY})`, () =>
+      claimOnChain(
+        algod,
+        appId,
+        ONCHAIN_IDENTITY,
+        auditorAccount,
+        payToAccount.addr.toString(),
+        usdcAsaId,
+        loraUrl,
+      ),
+    )
+    await check('on-chain: claim (ops)', () =>
+      claimOnChain(
+        algod,
+        appId,
+        ONCHAIN_OPS_IDENTITY,
+        opsAccount,
+        payToAccount.addr.toString(),
+        usdcAsaId,
+        loraUrl,
+      ),
+    )
+  } finally {
+    stopRehearsalProxy(rehearsalProxy)
+  }
 }
 
 async function main() {
@@ -631,7 +984,11 @@ async function main() {
     await check('on-chain: paid install -> plain USDC transfer, no inner txns', async () => {
       // Reuses the real MCP install tool — never a hand-rolled payment flow.
       const { installTool } = await import('../mcp/src/tools/install.js')
-      const result = await installTool.handler({ pkg: PAID_PKG, version: PAID_VER })
+      const result = await installTool.handler({
+        pkg: PAID_PKG,
+        version: PAID_VER,
+        allowDonation: true,
+      })
       if (!result.tarballPath || !fs.existsSync(result.tarballPath)) {
         throw new Error('tarball not saved to disk')
       }
@@ -640,7 +997,9 @@ async function main() {
       paymentTxid = result.txid
 
       // The payment leg is a plain USDC transfer to payTo. PaymentRouter's
-      // credit/claim step runs later and separately (see the SKIP below).
+      // credit/claim step runs later and separately (see §9 below) — this
+      // check's own payment never lands on the fresh, dedicated rehearsal
+      // payTo, so it never perturbs that step's exact-balance assertions.
       const info = await algod.pendingTransactionInformation(result.txid).do()
       const innerTxns = info.innerTxns ?? info['inner-txns'] ?? []
       if (innerTxns.length !== 0) {
@@ -673,10 +1032,10 @@ async function main() {
   }
 }
 
-// Guarded so scripts/e2e.test.mjs can import this module's pure
-// onChainRehearsalSkipReason export without running the whole e2e suite —
-// mirrors every other dual-purpose script in this directory (network.mjs,
-// rekey-payto.mjs, claim.mjs).
+// Guarded so scripts/e2e.test.mjs can import this module's pure exports
+// (onChainRehearsalSkipReason and the funding/precondition helpers)
+// without running the whole e2e suite — mirrors every other dual-purpose
+// script in this directory (network.mjs, rekey-payto.mjs, claim.mjs).
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((e) => {
     console.error('E2E: FAIL', e.stack ?? e.message)
