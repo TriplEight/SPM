@@ -6,7 +6,10 @@
 // scripts/verify.sh (which SKIPs it when those are absent) and by a real
 // operator run, never here.
 import assert from 'node:assert/strict'
+import path from 'node:path'
 import { test } from 'node:test'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { importWithoutEnvMutation } from './assert-no-env-import.mjs'
 import {
   assertDeployerFunded,
   assertDonorFundedForRehearsal,
@@ -16,6 +19,23 @@ import {
   onChainRehearsalSkipReason,
   payToFundingMicroAlgo,
 } from './e2e.mjs'
+
+const scriptsDir = path.dirname(fileURLToPath(import.meta.url))
+const e2eModuleHref = pathToFileURL(path.join(scriptsDir, 'e2e.mjs')).href
+
+// R3a Result 2: e2e.mjs's own import chain (claim.mjs, rekey-payto.mjs,
+// optin-usdc.mjs) must never read the root .env just because something
+// imports e2e.mjs — only main() (the CLI entry path) may. Checked in a
+// child process that never opens the real root .env
+// (assert-no-env-import.mjs) — the main tree's .env holds real TestNet
+// keys, and this test runs on every push. e2e.mjs's own top-level imports
+// are plain built-ins and local .mjs modules (no TypeScript source), so a
+// bare `node` import — no tsx — proves the whole chain.
+test("importing e2e.mjs's own module chain never touches .env or mutates process.env", () => {
+  const report = importWithoutEnvMutation(e2eModuleHref)
+  assert.deepEqual(report.envPaths, [])
+  assert.equal(report.envKeysChanged, false)
+})
 
 const ALL_VARS_SET = {
   DEPLOYER_MNEMONIC: 'word '.repeat(25).trim(),
