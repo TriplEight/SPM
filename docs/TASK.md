@@ -311,6 +311,13 @@ before any on-chain step, and stop with the endpoint and env var in the message.
 rehearsal's deployer budget includes the creator's app min-balance increase, computed from the
 ARC-56 schema (2,007,500 µALGO per run).
 
+### R3d. Unique rehearsal app; guarded operator deploy — DONE 95e3f27
+
+Result: each rehearsal run creates an app named `PaymentRouter-e2e-<ms>` and fails unless the
+deploy created it. The operator deploy keeps the name "PaymentRouter" and refuses, before any
+admin call, when the existing app's stored payTo or asset differs from `.env`.
+Also fixed with R3c: the indexer genesis comes from `/v2/blocks/1` (`8465742`), not `/health`.
+
 ### R4. TestNet rehearsal (before the MainNet rekey)
 
 Result, in two parts:
@@ -358,7 +365,7 @@ Acceptance: tests for unset, malformed and valid values on both networks. Owner:
 - **Wave 2:** Q2 → Q3; Q4; Q6; Q8; H3.
 - **Wave 3:** Q7; Q11; Q12; R2. H2 when the user is present.
 - **Qualification (human, by Sept 25):** SPEC §17 Q steps 1–6 on MainNet.
-- **Wave 4:** R3 → R3a → Q13 → R3b → R3c → R4 → MainNet rekey and first credit → D1.
+- **Wave 4:** R3 → R3a → Q13 → R3b → R3c → R3d → R4 → MainNet rekey and first credit → D1.
 
 ## After the MVP
 
