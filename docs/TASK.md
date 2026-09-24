@@ -298,6 +298,12 @@ deployer (about 1.72 ALGO per run), crediter and donor (0.25 USDC) keys. No scri
 on import; tests prove it without opening the real file. Step 8 sends the donation opt-in.
 Commits `faa59b2` (rehearsal) and `8c9e0b2` (tests never touch the real `.env`).
 
+### R3b. Fixes from the first live run — DONE 6740615
+
+Result: the offline attestation check parses `ATTEST_SIGNING_KEY` with the proxy's own parser
+(mnemonic or hex seed). The paid-install check reads the txid from the indexer with a bounded
+retry, not from the algod pool. Precondition errors name the account address.
+
 ### R4. TestNet rehearsal (before the MainNet rekey)
 
 Result, in two parts:
@@ -345,7 +351,7 @@ Acceptance: tests for unset, malformed and valid values on both networks. Owner:
 - **Wave 2:** Q2 → Q3; Q4; Q6; Q8; H3.
 - **Wave 3:** Q7; Q11; Q12; R2. H2 when the user is present.
 - **Qualification (human, by Sept 25):** SPEC §17 Q steps 1–6 on MainNet.
-- **Wave 4:** R3 → R3a → Q13 → R4 → MainNet rekey and first credit → D1.
+- **Wave 4:** R3 → R3a → Q13 → R3b → R4 → MainNet rekey and first credit → D1.
 
 ## After the MVP
 
