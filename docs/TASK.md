@@ -321,7 +321,8 @@ Also fixed with R3c: the indexer genesis comes from `/v2/blocks/1` (`8465742`), 
 ### R4. TestNet rehearsal (before the MainNet rekey)
 
 Result, in two parts:
-1. Claim rehearsal: `NETWORK=testnet bash scripts/demo.sh` PASSes. One lockfile payment with
+1. Claim rehearsal — DONE 2026-09-24 (txids in `NOTES.md`):
+   `NETWORK=testnet bash scripts/demo.sh` PASSes. One lockfile payment with
    250 reviewed entries (250,000 µUSDC) → nightly job credits batch 1 → `claim()` for the
    auditor (100,000) and for ops (150,000). One tarball payment credits only 400 / 600, below
    `MIN_CLAIM`, so the rehearsal uses 250 entries. The contract stays unchanged.

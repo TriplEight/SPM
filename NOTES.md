@@ -351,3 +351,19 @@ Next: `docs/TASK.md`, wave 1.
 - R3d `95e3f27`: unique rehearsal app name; operator deploy refuses a payTo mismatch.
 - Blocked (human): deployer E3P6K5E5… owns "PaymentRouter" 772548283 on TestNet (throwaway
   payTo). Use a new TestNet deployer (~7 ALGO) in `DEPLOYER_MNEMONIC` for R4.
+
+## 2026-09-24 — R4 part 1 PASS on TestNet (run 6, E2E 22/22, DEMO: PASS)
+New deployer `DFEMINAMFNQJ23WULKYQN4ARIJAQXU5PJQMPSTWN7PGJQPSW6XEY32ZP54`. Checked on the indexer:
+- Step 8 paid install: `EJ7AVIRROA5VLBAJGSWLOCXVJVUU4AERZLEBQDPAWKZRM7ZN73UA` (1,000 µUSDC → operator payTo).
+- Rehearsal payTo `MEIIAZ2R…` opt-in `QNZLYX7J6QJ5274HXHA6H4JFJAHHQ72NSZ36U5RSS6BCAWVUN3GQ` (67620520).
+- Deploy app 772551142: `EZRMTRJSSVRIMCCVLRPMUYA34FUBFSLGNPKLAQEWRIA77WK7XOWA`; setCrediter
+  `TXOBKNF72BQVRZXIE6FHLM3J4GMQ5HGIULLB23SDFPXIQD4PUE7A`.
+- Rekey payTo → app: `KWUTV7VBCUDMITKQ4EU3YWIQO2UOOUM4SXQPW5CMASSKFCZ2X2ZA` (67620540).
+- Lockfile payment, 250 reviewed entries: `UAZG6FXFG5UUOZ5X7EKOXV35MM3NMYFOYS4KVNS4XZ77C73UBC2A`
+  (250,000 µUSDC, 67620544).
+- Nightly credit, batch 1: `CGBHO2HHP3P2YQ442ULUAGT6TYJTGLRHQSNATPPPG2M6NEWINMVQ` (67620547).
+- Claim auditor: `GWJXJRMI767QIEZYU2QAZ2ANK4ULVBDCENJB2PS6JA66SLPWPFCQ` (inner 100,000 → GGDELU…).
+- Claim ops: `ZVQ2RVZ5OG7H3VO6PQXDTJAVVRFMNI7ZZSAVULM5W3CR23VMNHPQ` (inner 150,000 → IRLM4C…).
+- Operator payTo `UXWBBW…` holds step-8 deposits from runs 1–6 (6,000 µUSDC incl. the first 1,000
+  opt-in check); part 2's reconcile records them as `unassigned` ops income.
+- Next: R4 part 2 — the persistent TestNet deploy (`spm-test` domain, Compose, anchored review).
