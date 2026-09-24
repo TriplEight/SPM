@@ -21,6 +21,7 @@ import {
   claimantFundingMicroAlgo,
   creatorAppMbrIncreaseMicroAlgo,
   deployerFundingTotalMicroAlgo,
+  fetchIndexerGenesisId,
   onChainRehearsalSkipReason,
   payToFundingMicroAlgo,
   resolveTsxBin,
@@ -165,6 +166,67 @@ test('assertChainGenesisMatches FAILs an indexer genesis mismatch, naming NETWOR
         'INDEXER_URL',
       ),
     /indexer genesis id "mainnet-v1\.0" from https:\/\/mainnet-idx\.algonode\.cloud does not match NETWORK=testnet.*INDEXER_URL/s,
+  )
+})
+
+// --- fetchIndexerGenesisId (R3c fix attempt 1) ------------------------------
+//
+// The real /v2/blocks/1?header-only=true and /health response shapes,
+// checked against the live TestNet and MainNet indexers.
+
+function stubFetch(status, jsonBody) {
+  return async () => ({
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => jsonBody,
+  })
+}
+
+test('fetchIndexerGenesisId reads genesis-id from the real /v2/blocks/1 header shape', async () => {
+  const blockHeader = {
+    'genesis-id': 'testnet-v1.0',
+    'genesis-hash': 'wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=',
+    round: 1,
+  }
+  const genesisId = await fetchIndexerGenesisId(
+    'https://testnet-idx.algonode.cloud',
+    '',
+    stubFetch(200, blockHeader),
+  )
+  assert.equal(genesisId, 'testnet-v1.0')
+})
+
+test('fetchIndexerGenesisId FAILs with a dedicated error on the real /health shape (no genesis-id)', async () => {
+  const health = {
+    data: {},
+    'db-available': true,
+    'is-migrating': false,
+    message: '67619575',
+    round: 67619575,
+    version: '3.10.0-ndly',
+  }
+  await assert.rejects(
+    () => fetchIndexerGenesisId('https://testnet-idx.algonode.cloud', '', stubFetch(200, health)),
+    /indexer at https:\/\/testnet-idx\.algonode\.cloud returned no genesis-id from \/v2\/blocks\/1/,
+  )
+})
+
+test('fetchIndexerGenesisId FAILs with a dedicated error on an empty genesis-id', async () => {
+  await assert.rejects(
+    () =>
+      fetchIndexerGenesisId(
+        'https://testnet-idx.algonode.cloud',
+        '',
+        stubFetch(200, { 'genesis-id': '' }),
+      ),
+    /indexer at https:\/\/testnet-idx\.algonode\.cloud returned no genesis-id from \/v2\/blocks\/1/,
+  )
+})
+
+test('fetchIndexerGenesisId FAILs on a non-ok HTTP response, naming the URL and status', async () => {
+  await assert.rejects(
+    () => fetchIndexerGenesisId('https://testnet-idx.algonode.cloud', '', stubFetch(500, {})),
+    /indexer genesis check: GET https:\/\/testnet-idx\.algonode\.cloud\/v2\/blocks\/1.*HTTP 500/s,
   )
 })
 

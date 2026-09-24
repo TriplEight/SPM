@@ -106,6 +106,44 @@ export function assertChainGenesisMatches(component, network, genesisId, endpoin
   }
 }
 
+// The indexer has no dedicated genesis endpoint. /health carries no
+// genesis-id (checked against the live indexers, R3c fix attempt 1):
+//   {"data":{...},"db-available":true,"is-migrating":false,
+//    "message":"<round>","round":<round>,"version":"..."}
+// Round 1's header does, alongside genesis-hash.
+const INDEXER_GENESIS_PATH = '/v2/blocks/1?header-only=true'
+
+/**
+ * Fetches the indexer's own genesis id from round 1's block header. A
+ * missing or empty genesis-id is its own error, never compared as "" (R3c
+ * fix attempt 1) — `fetchImpl` is injectable so this is unit-testable
+ * without a real indexer (scripts/e2e.test.mjs).
+ *
+ * @param {string} indexerServer
+ * @param {string} indexerToken
+ * @param {typeof fetch} [fetchImpl]
+ * @returns {Promise<string>}
+ */
+export async function fetchIndexerGenesisId(indexerServer, indexerToken, fetchImpl = fetch) {
+  const res = await fetchImpl(`${indexerServer}${INDEXER_GENESIS_PATH}`, {
+    headers: indexerToken ? { 'X-Indexer-API-Token': indexerToken } : {},
+  })
+  if (!res.ok) {
+    throw new Error(
+      `indexer genesis check: GET ${indexerServer}${INDEXER_GENESIS_PATH} ` +
+        `returned HTTP ${res.status}`,
+    )
+  }
+  const block = await res.json()
+  const genesisId = block['genesis-id']
+  if (!genesisId) {
+    throw new Error(
+      `indexer at ${indexerServer} returned no genesis-id from ${INDEXER_GENESIS_PATH}`,
+    )
+  }
+  return genesisId
+}
+
 /**
  * Fetches algod's and the indexer's own genesis ids for `network` and
  * checks both against it. WARNING: call this first in every path that
@@ -120,22 +158,8 @@ async function assertNetworkGenesisMatchesEverywhere(network) {
   assertChainGenesisMatches('algod', network, sp.genesisID ?? '', algodServer, 'ALGOD_SERVER')
 
   const { server: indexerServer, token: indexerToken } = indexerEndpoint(network)
-  const res = await fetch(`${indexerServer}/health`, {
-    headers: indexerToken ? { 'X-Indexer-API-Token': indexerToken } : {},
-  })
-  if (!res.ok) {
-    throw new Error(
-      `indexer genesis check: GET ${indexerServer}/health returned HTTP ${res.status}`,
-    )
-  }
-  const health = await res.json()
-  assertChainGenesisMatches(
-    'indexer',
-    network,
-    health['genesis-id'] ?? '',
-    indexerServer,
-    'INDEXER_URL',
-  )
+  const indexerGenesisId = await fetchIndexerGenesisId(indexerServer, indexerToken)
+  assertChainGenesisMatches('indexer', network, indexerGenesisId, indexerServer, 'INDEXER_URL')
 }
 
 // ATTEST_SIGNING_KEY is either a 25-word Algorand mnemonic or a hex-encoded
