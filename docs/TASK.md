@@ -318,6 +318,12 @@ deploy created it. The operator deploy keeps the name "PaymentRouter" and refuse
 admin call, when the existing app's stored payTo or asset differs from `.env`.
 Also fixed with R3c: the indexer genesis comes from `/v2/blocks/1` (`8465742`), not `/health`.
 
+### R3e. Operator deploy entry point
+
+Result: `pnpm run deploy:ci` (and `algokit project deploy`) runs in `contracts/`; the client
+reads `INDEXER_URL` with per-network defaults; a failed deploy exits non-zero. Found in R4
+part 2 (see `NOTES.md`). Owner: `algorand-contract-engineer`.
+
 ### R4. TestNet rehearsal (before the MainNet rekey)
 
 Result, in two parts:
@@ -328,7 +334,8 @@ Result, in two parts:
    `MIN_CLAIM`, so the rehearsal uses 250 entries. The contract stays unchanged.
 2. Persistent TestNet deploy, as on MainNet: the operator's `payTo` opt-in → deploy
    PaymentRouter → rekey → Compose at the TestNet domain → one real anchored review → one
-   payment through GoPlausible → nightly job (backup, credit batch 1).
+   payment through GoPlausible → nightly job (backup, credit batch 1). Deployed app 772553842;
+   the step guide is in `NOTES.md`.
 
 Acceptance: the txid of each step is in `NOTES.md`.
 
@@ -350,6 +357,8 @@ After the tracks are merged and `verify.sh` passes:
    runs daily after the nightly timer (03:17 UTC), excludes `.audit-*.db.tmp`, and alerts the
    operator on a snapshot error. Check: after one night, the newest `audit-*.db` is in the
    latest snapshot.
+7. TestNet and MainNet share one host: document a separate directory, Compose project name,
+   port, volume, nightly unit and `cloudflared` ingress rule for each.
 
 ### Q13. Issuer URL and key date required on every network — DONE c65edd5
 
@@ -366,7 +375,7 @@ Acceptance: tests for unset, malformed and valid values on both networks. Owner:
 - **Wave 2:** Q2 → Q3; Q4; Q6; Q8; H3.
 - **Wave 3:** Q7; Q11; Q12; R2. H2 when the user is present.
 - **Qualification (human, by Sept 25):** SPEC §17 Q steps 1–6 on MainNet.
-- **Wave 4:** R3 → R3a → Q13 → R3b → R3c → R3d → R4 → MainNet rekey and first credit → D1.
+- **Wave 4:** R3 → R3a → Q13 → R3b → R3c → R3d → R3e → R4 → MainNet rekey and first credit → D1.
 
 ## After the MVP
 
