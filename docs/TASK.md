@@ -290,15 +290,26 @@ never a false PASS. Without them, it SKIPs with its reason. Merge the useful par
 
 Depends on R1, R2, Q7.
 
+### R3a. Self-contained rehearsal — DONE 8c9e0b2
+
+Result: each rehearsal run makes its own `payTo`, claimants, PaymentRouter app and proxy with a
+throwaway ledger, so a run never meets another ledger's batch sequence. It needs only the
+deployer (about 1.72 ALGO per run), crediter and donor (0.25 USDC) keys. No script loads `.env`
+on import; tests prove it without opening the real file. Step 8 sends the donation opt-in.
+Commits `faa59b2` (rehearsal) and `8c9e0b2` (tests never touch the real `.env`).
+
 ### R4. TestNet rehearsal (before the MainNet rekey)
 
-Result: on TestNet: `payTo` opt-in → one lockfile payment through GoPlausible with 250
-reviewed entries (250,000 µUSDC) → deploy → rekey → nightly job credits batch 1 → `claim()` for
-the auditor and for ops. One tarball payment credits only 400 / 600, which is below `MIN_CLAIM`
-(100,000). The contract stays unchanged. The 250 entries share one repo and one reviewer
-identity, so batch 1 has one auditor entry. R3 runs this sequence (`scripts/demo.sh`).
+Result, in two parts:
+1. Claim rehearsal: `NETWORK=testnet bash scripts/demo.sh` PASSes. One lockfile payment with
+   250 reviewed entries (250,000 µUSDC) → nightly job credits batch 1 → `claim()` for the
+   auditor (100,000) and for ops (150,000). One tarball payment credits only 400 / 600, below
+   `MIN_CLAIM`, so the rehearsal uses 250 entries. The contract stays unchanged.
+2. Persistent TestNet deploy, as on MainNet: the operator's `payTo` opt-in → deploy
+   PaymentRouter → rekey → Compose at the TestNet domain → one real anchored review → one
+   payment through GoPlausible → nightly job (backup, credit batch 1).
 
-Acceptance: the txid of each step is in `NOTES.md`; R3 PASSes on TestNet.
+Acceptance: the txid of each step is in `NOTES.md`.
 
 ### D1. Rewrite the operator docs (last)
 
@@ -333,7 +344,7 @@ Acceptance: tests for unset, malformed and valid values on both networks. Owner:
 - **Wave 2:** Q2 → Q3; Q4; Q6; Q8; H3.
 - **Wave 3:** Q7; Q11; Q12; R2. H2 when the user is present.
 - **Qualification (human, by Sept 25):** SPEC §17 Q steps 1–6 on MainNet.
-- **Wave 4:** R3 → R4 → Q13 → MainNet rekey and first credit → D1.
+- **Wave 4:** R3 → R3a → Q13 → R4 → MainNet rekey and first credit → D1.
 
 ## After the MVP
 
