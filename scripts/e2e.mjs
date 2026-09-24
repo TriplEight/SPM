@@ -30,7 +30,7 @@ import {
   submitClaim,
 } from './claim.mjs'
 import { assertSqliteWriteAllowed } from './e2e-guard.mjs'
-import { algodEndpoint, usdcAssetId } from './network.mjs'
+import { algodEndpoint, indexerEndpoint, usdcAssetId } from './network.mjs'
 import { optinAccountToUsdc } from './optin-usdc.mjs'
 import { rekeyPayToToApp } from './rekey-payto.mjs'
 
@@ -70,6 +70,94 @@ async function check(name, fn) {
 function skip(name, reason) {
   console.log(`  ${name}: SKIP - ${reason}`)
   skipped++
+}
+
+// ATTEST_SIGNING_KEY is either a 25-word Algorand mnemonic or a hex-encoded
+// 32-byte seed (.env.example) — the exact same detection proxy/src/config.ts's
+// getAttestationSigningKey() uses. Duplicated here only as the format-sniff
+// (one regex); the actual key derivation is never duplicated — it always
+// runs through proxy/src/attest/keys.ts's own loadSigningKey.
+const HEX_SEED_RE = /^[0-9a-fA-F]{64}$/
+
+/**
+ * Derives the SPM attestation signing key from ATTEST_SIGNING_KEY's raw
+ * value, the same way the running proxy does, so this check can never
+ * disagree with what the proxy actually signed with (Defect 1, R3b). The
+ * former version always ran `Buffer.from(source, 'hex')`, which silently
+ * mangled a mnemonic into 0-32 garbage bytes and failed with "seed must be
+ * exactly 32 bytes" — the seed length check firing on the wrong root cause.
+ *
+ * @param {string} source - the raw ATTEST_SIGNING_KEY value.
+ * @returns {Promise<import('../proxy/src/attest/keys.js').SigningKey>}
+ */
+export async function deriveAttestSigningKey(source) {
+  const { loadSigningKey } = await import('../proxy/src/attest/keys.js')
+  const mnemonicOrSeed = HEX_SEED_RE.test(source)
+    ? Uint8Array.from(Buffer.from(source, 'hex'))
+    : source
+  return loadSigningKey(mnemonicOrSeed)
+}
+
+/**
+ * Polls the indexer for `txid` until it appears or `timeoutMs` elapses.
+ * WARNING: algod's `pendingTransactionInformation` is not a substitute for
+ * an already-confirmed txid — a load-balanced public algod node can 404 a
+ * transaction it never itself saw in its own mempool, even rounds after it
+ * confirmed elsewhere (Defect 2, R3b). The indexer is the source of truth
+ * for a confirmed transaction; it can lag confirmation by a few seconds, so
+ * this polls with a bounded retry instead of a single lookup. A timeout is
+ * a thrown error carrying the txid — never a silent pass.
+ *
+ * @param {{lookupTransactionByID(id: string): {do(): Promise<{transaction?: object}>}}} indexerClient
+ * @param {string} txid
+ * @param {{timeoutMs?: number, intervalMs?: number, sleep?: (ms: number) => Promise<void>}} [opts]
+ * @returns {Promise<object>} the indexer's transaction record (camelCase, algosdk v3 shape)
+ */
+export async function waitForIndexerTransaction(indexerClient, txid, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 30_000
+  const intervalMs = opts.intervalMs ?? 1_000
+  const sleep = opts.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
+  const deadline = Date.now() + timeoutMs
+  let lastErrorMessage = 'never queried'
+  while (Date.now() < deadline) {
+    try {
+      const { transaction } = await indexerClient.lookupTransactionByID(txid).do()
+      if (transaction) return transaction
+      lastErrorMessage = 'indexer returned no transaction'
+    } catch (e) {
+      lastErrorMessage = e.message
+    }
+    await sleep(intervalMs)
+  }
+  throw new Error(
+    `indexer never confirmed txid ${txid} within ${timeoutMs}ms (last: ${lastErrorMessage})`,
+  )
+}
+
+/**
+ * Refuses unless `transaction` is a plain USDC asset transfer to `payToAddress`
+ * with no inner transactions — the exact shape the x402 exact scheme settles
+ * (CLAUDE.md invariant 3: `asset` always explicit; spm-x402-flow: "the
+ * payment is a plain USDC asset transfer to payTo"). Pure: no network access.
+ *
+ * @param {object} transaction - an indexer transaction record (camelCase, algosdk v3 shape)
+ * @param {{payToAddress: string, assetId: number|bigint, txid: string}} expected
+ */
+export function assertPlainUsdcTransferNoInner(transaction, { payToAddress, assetId, txid }) {
+  const axfer = transaction.assetTransferTransaction
+  if (transaction.txType !== 'axfer' || !axfer) {
+    throw new Error(`txid ${txid} is not an asset transfer (got txType ${transaction.txType})`)
+  }
+  if (BigInt(axfer.assetId) !== BigInt(assetId)) {
+    throw new Error(`txid ${txid} moves asset ${axfer.assetId}, expected USDC asset ${assetId}`)
+  }
+  if (axfer.receiver !== payToAddress) {
+    throw new Error(`txid ${txid} pays ${axfer.receiver}, expected payTo ${payToAddress}`)
+  }
+  const innerTxns = transaction.innerTxns ?? []
+  if (innerTxns.length !== 0) {
+    throw new Error(`txid ${txid} carries ${innerTxns.length} inner transaction(s), expected 0`)
+  }
 }
 
 // ── On-chain: PaymentRouter 250-package credit/claim rehearsal (R3a) ───────
@@ -174,34 +262,44 @@ export function deployerFundingTotalMicroAlgo() {
 
 /**
  * Refuses when the deployer cannot fund payTo, both claimants, the app
- * account, and the deploy itself. Pure: no network access.
+ * account, and the deploy itself. Pure: no network access. Names the
+ * deployer's own public address in the message (Defect 3, R3b) — never a
+ * mnemonic or any other secret.
  *
  * @param {number} deployerBalanceMicroAlgo
  * @param {number} [requiredMicroAlgo]
+ * @param {string} [deployerAddress]
  */
 export function assertDeployerFunded(
   deployerBalanceMicroAlgo,
   requiredMicroAlgo = deployerFundingTotalMicroAlgo(),
+  deployerAddress = '(address unknown)',
 ) {
   if (deployerBalanceMicroAlgo < requiredMicroAlgo) {
     throw new Error(
-      `deployer holds ${deployerBalanceMicroAlgo} microALGO, needs at least ${requiredMicroAlgo} ` +
-        'to fund payTo, the auditor and ops claimants, and deploy a fresh PaymentRouter',
+      `deployer ${deployerAddress} holds ${deployerBalanceMicroAlgo} microALGO, needs at ` +
+        `least ${requiredMicroAlgo} to fund payTo, the auditor and ops claimants, and deploy ` +
+        'a fresh PaymentRouter',
     )
   }
 }
 
 /**
  * Refuses when the donor cannot pay for the whole ONCHAIN_ENTRY_COUNT-package
- * lockfile. Pure: no network access.
+ * lockfile. Pure: no network access. Names the donor's own public address in
+ * the message (Defect 3, R3b) — never a mnemonic or any other secret.
  *
  * @param {number} donorBalanceMicroUsdc
+ * @param {string} [donorAddress]
  */
-export function assertDonorFundedForRehearsal(donorBalanceMicroUsdc) {
+export function assertDonorFundedForRehearsal(
+  donorBalanceMicroUsdc,
+  donorAddress = '(address unknown)',
+) {
   if (donorBalanceMicroUsdc < ONCHAIN_TOTAL_MICRO) {
     throw new Error(
-      `donor holds ${donorBalanceMicroUsdc} microUSDC, needs at least ${ONCHAIN_TOTAL_MICRO} ` +
-        `to pay for the ${ONCHAIN_ENTRY_COUNT}-package lockfile`,
+      `donor ${donorAddress} holds ${donorBalanceMicroUsdc} microUSDC, needs at least ` +
+        `${ONCHAIN_TOTAL_MICRO} to pay for the ${ONCHAIN_ENTRY_COUNT}-package lockfile`,
     )
   }
 }
@@ -211,19 +309,26 @@ export function assertDonorFundedForRehearsal(donorBalanceMicroUsdc) {
  * same address — the crediter key must never double as a cold key
  * (spm-payment-router skill), and a self-funding donor would make the
  * "donor holds enough USDC" precondition meaningless. Pure: no network
- * access.
+ * access. Names the two colliding public addresses in the message (Defect
+ * 3, R3b) — never a mnemonic or any other secret.
  *
  * @param {{deployerAddress: string, crediterAddress: string, donorAddress: string}} addrs
  */
 export function assertRehearsalKeysDistinct({ deployerAddress, crediterAddress, donorAddress }) {
   if (crediterAddress === deployerAddress) {
-    throw new Error('CREDITER_MNEMONIC must not resolve to the same address as DEPLOYER_MNEMONIC')
+    throw new Error(
+      `CREDITER_MNEMONIC must not resolve to the same address as DEPLOYER_MNEMONIC (both ${crediterAddress})`,
+    )
   }
   if (deployerAddress === donorAddress) {
-    throw new Error('DEPLOYER_MNEMONIC must not resolve to the same address as SPM_DONOR_MNEMONIC')
+    throw new Error(
+      `DEPLOYER_MNEMONIC must not resolve to the same address as SPM_DONOR_MNEMONIC (both ${deployerAddress})`,
+    )
   }
   if (crediterAddress === donorAddress) {
-    throw new Error('CREDITER_MNEMONIC must not resolve to the same address as SPM_DONOR_MNEMONIC')
+    throw new Error(
+      `CREDITER_MNEMONIC must not resolve to the same address as SPM_DONOR_MNEMONIC (both ${crediterAddress})`,
+    )
   }
 }
 
@@ -328,7 +433,7 @@ function findFreePort() {
   })
 }
 
-function resolveTsxBin() {
+export function resolveTsxBin() {
   for (const dir of ['mcp', 'proxy', 'cli']) {
     const bin = path.join(scriptDir, '..', dir, 'node_modules', '.bin', 'tsx')
     if (fs.existsSync(bin)) return bin
@@ -345,7 +450,7 @@ function resolveTsxBin() {
  * through the shell's own environment or a `--env-file` flag). Throws with
  * the combined stdout/stderr on a non-zero exit.
  */
-function runTsxScript(tsxBin, cwd, relativeScript, env) {
+export function runTsxScript(tsxBin, cwd, relativeScript, env) {
   const result = spawnSync(tsxBin, [relativeScript], { cwd, env, encoding: 'utf8' })
   if (result.status !== 0) {
     throw new Error(
@@ -540,9 +645,9 @@ async function runOnChainRehearsal(loraUrl) {
       donorAddress: donorAccount.addr.toString(),
     })
     const deployerInfo = await algod.accountInformation(deployerAccount.addr.toString()).do()
-    assertDeployerFunded(Number(deployerInfo.amount))
+    assertDeployerFunded(Number(deployerInfo.amount), undefined, deployerAccount.addr.toString())
     const donorBalance = await usdcHolding(algod, donorAccount.addr.toString(), usdcAsaId)
-    assertDonorFundedForRehearsal(donorBalance)
+    assertDonorFundedForRehearsal(donorBalance, donorAccount.addr.toString())
   })
   if (!preconditionsOk) return
 
@@ -901,11 +1006,9 @@ async function main() {
   // ── 4. Offline verification — reuse the CLI verifier, never reimplement ──
   await check('attestation verifies offline (spm verify)', async () => {
     if (!attestation) throw new Error('no attestation captured from check 3')
-    const seedHex = process.env.ATTEST_SIGNING_KEY
-    if (!seedHex) throw new Error('ATTEST_SIGNING_KEY not set in this process')
-    const seedBytes = Uint8Array.from(Buffer.from(seedHex, 'hex'))
-    const { loadSigningKey } = await import('../proxy/src/attest/keys.js')
-    const signingKey = await loadSigningKey(seedBytes)
+    const signingKeySource = process.env.ATTEST_SIGNING_KEY
+    if (!signingKeySource) throw new Error('ATTEST_SIGNING_KEY not set in this process')
+    const signingKey = await deriveAttestSigningKey(signingKeySource)
     const keyArg = `${signingKey.keyid}:${Buffer.from(signingKey.publicKey).toString('base64')}`
 
     const envelopePath = path.join(tmpDir, 'lockfile-attestation.json')
@@ -971,15 +1074,6 @@ async function main() {
       'SPM_DONOR_MNEMONIC not set — no funded wallet in this environment',
     )
   } else {
-    const ALGOD_SERVER =
-      process.env.ALGOD_SERVER ??
-      (NETWORK === 'testnet'
-        ? 'https://testnet-api.algonode.cloud'
-        : 'https://mainnet-api.algonode.cloud')
-    const ALGOD_PORT = process.env.ALGOD_PORT ?? '443'
-    const ALGOD_TOKEN = process.env.ALGOD_TOKEN ?? ''
-    const algod = new algosdk.Algodv2(ALGOD_TOKEN, ALGOD_SERVER, ALGOD_PORT)
-
     let paymentTxid
     await check('on-chain: paid install -> plain USDC transfer, no inner txns', async () => {
       // Reuses the real MCP install tool — never a hand-rolled payment flow.
@@ -1000,11 +1094,19 @@ async function main() {
       // credit/claim step runs later and separately (see §9 below) — this
       // check's own payment never lands on the fresh, dedicated rehearsal
       // payTo, so it never perturbs that step's exact-balance assertions.
-      const info = await algod.pendingTransactionInformation(result.txid).do()
-      const innerTxns = info.innerTxns ?? info['inner-txns'] ?? []
-      if (innerTxns.length !== 0) {
-        throw new Error(`payment txn must carry no inner transactions, found ${innerTxns.length}`)
-      }
+      //
+      // Looked up through the indexer, never algod's pendingTransactionInformation
+      // (Defect 2, R3b): a load-balanced public algod node can 404 an
+      // already-confirmed txid it never itself saw. The indexer lags
+      // confirmation by a few seconds, so this retries with a bound.
+      const { server, port, token } = indexerEndpoint(NETWORK)
+      const indexerClient = new algosdk.Indexer(token, server, port)
+      const transaction = await waitForIndexerTransaction(indexerClient, result.txid)
+      assertPlainUsdcTransferNoInner(transaction, {
+        payToAddress: PAY_TO,
+        assetId: USDC_ASA_ID,
+        txid: result.txid,
+      })
       console.log(`\n    Settlement: ${result.txid}`)
       console.log(`    Lora: ${loraUrl(result.txid)}`)
       return result.txid
