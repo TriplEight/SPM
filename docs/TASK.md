@@ -387,7 +387,7 @@ One `compose.yaml` for the local machine and for Portainer:
 Check: `docker compose config` passes with only `.env`, and with only `stack.env`.
 Owner: `x402-proxy-engineer`. After N1 and N2.
 
-### T1. Stray test processes
+### T1. Stray test processes — DONE c086ac2
 
 `proxy/src/index.test.ts` spawns the server through `pnpm` → `tsx` → `node`. `SIGKILL` stops only
 the top process. The `node` child can stay alive and hold a fixed test port in the next run.
