@@ -348,7 +348,7 @@ becomes the MainNet host. Before the MainNet deploy, the operator moves TestNet 
 
 Check: the status route on the new TestNet host shows the recorded reviews.
 
-### N1. Nightly scheduler inside the proxy
+### N1. Nightly scheduler inside the proxy — DONE c4d07d4
 
 The proxy process runs the nightly job. The host systemd timer is removed. One process stays the
 only writer (ADR 0001).
