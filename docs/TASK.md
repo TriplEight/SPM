@@ -394,6 +394,19 @@ Acceptance: tests for unset, malformed and valid values on both networks. Owner:
 production dependencies. Result: triage each advisory, upgrade with exact pins, and re-run the
 proxy tests. Check: no moderate-or-higher advisory in a production dependency.
 
+**Result.** The proxy's direct `hono` and `@hono/node-server` were not affected; the advisories
+came from transitive dependencies. `mcp/package.json` pins
+`@modelcontextprotocol/sdk@1.30.1` (was 1.29.0). `pnpm-workspace.yaml` adds exact-pinned
+`overrides` for the transitive packages that carried the remaining advisories: `ws` 8.21.0,
+`fast-uri` 3.1.6, `ip-address` 10.3.1, `qs` 6.16.0, `tar` 7.5.21, `brace-expansion@1` 1.1.18,
+`brace-expansion@5` 5.0.9, `nanoid` 3.3.18, `postcss` 8.5.23, `esbuild` 0.28.1, and
+`body-parser` 2.3.0. Each pin is the lowest patched version inside the major version the
+parent package already declares; no `@x402-avm/*` package changed. Check:
+`pnpm audit --prod --audit-level=moderate` exits 0 — no moderate-or-higher advisory in any
+production dependency. One dev advisory is left: `elliptic` (low severity, pulled by
+`@algorandfoundation/algorand-typescript-testing`), because the advisory database lists no
+patched version.
+
 ## After the MVP
 
 - **A1. Auditor onboarding at run time.** Adding or removing an auditor needs no `.env` edit,
