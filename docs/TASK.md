@@ -324,7 +324,7 @@ Result: `pnpm run deploy:ci` (and `algokit project deploy`) runs in `contracts/`
 reads `INDEXER_URL` with per-network defaults; a failed deploy exits non-zero. Found in R4
 part 2 (see `NOTES.md`). Owner: `algorand-contract-engineer`.
 
-### R4. TestNet rehearsal (before the MainNet rekey)
+### R4. TestNet rehearsal (before the MainNet rekey) — DONE 07ccce4
 
 Result, in two parts:
 1. Claim rehearsal — DONE 2026-09-24 (txids in `NOTES.md`):
@@ -332,7 +332,7 @@ Result, in two parts:
    250 reviewed entries (250,000 µUSDC) → nightly job credits batch 1 → `claim()` for the
    auditor (100,000) and for ops (150,000). One tarball payment credits only 400 / 600, below
    `MIN_CLAIM`, so the rehearsal uses 250 entries. The contract stays unchanged.
-2. Persistent TestNet deploy, as on MainNet: the operator's `payTo` opt-in → deploy
+2. Persistent TestNet deploy — DONE 2026-09-25, as on MainNet: the operator's `payTo` opt-in → deploy
    PaymentRouter → rekey → Compose at the TestNet domain → one real anchored review → one
    payment through GoPlausible → nightly job (backup, credit batch 1). Deployed app 772553842;
    the step guide is in `NOTES.md`.
