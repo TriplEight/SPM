@@ -1,295 +1,257 @@
-# Runbook — MainNet launch and qualification
+# Runbook — MainNet deploy
 
-WARNING: this runbook describes SPEC v4 (SplitRouter, `distribute()`, `$0.02` flat lockfile
-price). SPEC v6 replaces that design. Do not follow it on MainNet. `docs/TASK.md` item D1
-rewrites it from the v6 code. Until then, use `SPEC.md` §10, §13, §14 and §17.
+Audience: the operator, deploying PaymentRouter and the proxy to MainNet Algorand. Read
+`docs/RUNBOOK-contract-build.md` first if the contract source changed since the last build.
+Read `docs/DEPLOY-GUIDE.local.md` for the full TestNet rehearsal this runbook assumes already
+passed — every command below is a MainNet repeat of a step already proven there.
 
-**Audience:** the next session, starting after the contract artifacts are
-regenerated, MainNet is provisioned and deployed, and third-party donor
-accounts exist.
-
-Everything buildable without a chain, a domain or a human reviewer is already
-done and merged. This runbook covers what remains.
+Ground truth: `SPEC.md` §10, §13, §14 and §17, and `CLAUDE.md`. `NOTES.md` holds the TestNet
+rehearsal's txids.
 
 ---
 
-## 0. Verify the preconditions. Do not trust them.
+## 1. Order that cannot reverse
 
-Each of these was done outside this repository, so check each on-chain or on
-disk before building on it.
+Two facts fix the order of every step in this runbook. Read them before you run anything.
 
-```bash
-# 0.1 The artifacts describe THIS contract, not the old one.
-node -e "const j=require('./contracts/smart_contracts/artifacts/split_router/SplitRouter.arc56.json'); console.log(j.methods.map(m=>m.name).join(' '))"
-```
-Expect exactly: `setPayTo setRecipients optInToAsset distribute attest releaseAuthority
-setAttestationKey`. Order may differ; the set must not.
-WARNING: if `pay` appears, the build did not run. Stop and run
-`docs/RUNBOOK-contract-build.md` first. Everything below assumes the new ABI.
-WARNING: if `setPayTo` is missing, the build predates the variant-B fix, and
-`releaseAuthority` cannot succeed. See 1.3.
-
-```bash
-# 0.2 The app account is opted into MainNet USDC (31566704).
-curl -s "https://mainnet-api.algonode.cloud/v2/accounts/<SPLIT_APP_ADDRESS>" \
-  | jq '.assets[] | select(."asset-id"==31566704)'
-```
-An empty result means the opt-in is missing, and every payment will fail.
-
-```bash
-# 0.3 All five recipients are opted in. Repeat 0.2 for each address.
-# 0.4 setRecipients() ran, and the stored addresses are the intended ones.
-# 0.5 Each third-party donor is funded AND opted into 31566704.
-```
-CAUTION: a donor who holds USDC but is not opted in cannot donate. A donor
-who is opted in but holds no ALGO cannot sign. Check both.
+- **`payTo` is the leaderboard key for the whole competition** (CLAUDE.md invariant 1). It opts
+  into USDC first, then rekeys to PaymentRouter. A rekeyed account cannot sign its own asset
+  opt-in, so this order cannot reverse. Once the first payment lands, `payTo` never changes.
+- **The attribution tag is written at settlement, not retroactively.** `extra.tag ==
+  "x402-global-challenge"` must be live in the server's 402 response before the first real
+  payment. A payment that settles before the tag is live never moves into the challenge bucket.
 
 ---
 
-## 1. The three traps that cost the most if missed
+## 2. Provision `payTo` and deploy PaymentRouter
 
-### 1.1 `distribute()` will not run on a single small payment
+Do this from a workstation, never on the server. Keep `PAY_TO_MNEMONIC`, `DEPLOYER_MNEMONIC`
+and `CREDITER_MNEMONIC` out of the server's `.env` (CLAUDE.md canonical facts table).
 
-`distribute()` asserts a floor of **100,000 µUSDC ($0.10)**. It is the
-fee-drain guard: without it, anyone could loop the call and burn the app's
-ALGO on inner-transaction fees.
+1. Opt `payTo` into MainNet USDC (31566704).
+   ```bash
+   node scripts/optin-usdc.mjs PAY_TO_MNEMONIC --network mainnet --confirm-mainnet
+   ```
+   Check: `curl -s "https://mainnet-api.algonode.cloud/v2/accounts/<PAY_TO_ADDRESS>" | jq
+   '.assets[] | select(."asset-id"==31566704)'` returns a non-empty result.
 
-| Route | Price | Payments needed to reach $0.10 |
-|---|---|---|
-| tarball | $0.001 | 100 |
-| single attest | $0.001 | 100 |
-| lockfile | $0.02 | **5** |
+2. Set `DEPLOYER_MNEMONIC`, `CREDITER_MNEMONIC`, `PAY_TO_ADDRESS`, `OPS_ADDRESS` and `AUDITORS`
+   in the root `.env`, plus `NETWORK=mainnet` and `CONFIRM_MAINNET=1` for this one run. Deploy:
+   ```bash
+   ( set -a; . ./.env; set +a; cd contracts && pnpm run deploy:ci )
+   ```
+   This creates PaymentRouter, funds the app account for box storage, calls `setCrediter`, and
+   calls `setIdentity` for every `AUDITORS` entry plus `ops`.
+   Check: the command prints `PaymentRouter app id: <id>.`. Set `PAYMENT_ROUTER_APP_ID` to that
+   id in `.env`. Clear `CONFIRM_MAINNET` afterward.
 
-The qualification checklist requires `distribute()` executed on MainNet with
-five inner transfers visible on Lora. **One qualifying payment of $0.001 will
-not get you there.** The call reverts with `below minimum distribution`.
+3. Rekey `payTo` to the app.
+   ```bash
+   node scripts/rekey-payto.mjs PAY_TO_MNEMONIC --network mainnet --confirm-mainnet
+   ```
+   Check: `curl -s "https://mainnet-api.algonode.cloud/v2/accounts/<PAY_TO_ADDRESS>" | jq
+   '."auth-addr"'` equals the app address printed in step 2.
 
-Options, cheapest first:
-1. Make **five lockfile calls** ($0.10 total). Legitimate traffic, and it is
-   the route you want volume on anyway.
-2. Send USDC directly to `payTo` to top the balance up. The reconciliation job
-   ledgers a direct inflow as `unassigned`, which is correct and honest.
+Clear `PAY_TO_MNEMONIC` from `.env` once step 3 succeeds. The key has no further signing power
+over `payTo` (CLAUDE.md: cold keys never touch the server).
 
-WARNING: do not lower `MIN_DISTRIBUTE` to make a demo work. Below roughly
-$0.10 a call can cost more in fees than it moves, which is the exact hole the
-guard closes.
-
-Also fund the app with about 1 ALGO for minimum balance and headroom, and pool
-at least 6,000 µALGO on the `distribute()` call itself, because the inner
-transfers are sent with fee 0.
-
-### 1.2 Attribution is written at settlement and is not retroactive
-
-The `x402-global-challenge` tag must be present in `extra` **before the first
-real payment**. Payments settled before it is live are attributed to `direct`
-or `dev` and never move to the challenge bucket.
-
-Confirm the tag is live before anyone pays:
-
-```bash
-curl -si "https://<domain>/v1/attest?name=ms&version=2.1.3" | grep -i "PAYMENT-REQUIRED"
-```
-Decode that header and confirm `extra.tag`, `extra.asset` = `31566704`, and
-`extra.feePayer`.
-WARNING: the 402 **body is `{}`**. The requirements are in the header. A check
-that greps the body will report a false negative.
-
-`scripts/check-402.mjs <url>` decodes the header and prints one PASS/FAIL line
-per field: `extra.tag`, `extra.asset`, `network`, and `extra.feePayer` (the
-last resolved live from the facilitator's `getSupported()`, never hardcoded).
-
-### 1.3 `payTo` is the leaderboard key
-
-One address for the whole competition. Changing it after the first settled
-payment restarts the entry at zero.
-
-Two variants ship. Decide before the first call, because `payTo` is write-once.
-
-- **Variant A, the default.** `payTo` is the application address. Call
-  `setRecipients` and skip `setPayTo`. `releaseAuthority` is unusable here, by
-  design: an application account cannot be rekeyed.
-- **Variant B, the rekey path.** `payTo` is a plain account rekeyed to the
-  application. Call `setPayTo(<address>)` **before** `setRecipients`.
-  `releaseAuthority` later rekeys that account away.
-
-`setPayTo` corrects `payTo` only while it holds zero USDC. Once revenue
-lands it asserts `payTo already holds revenue`, and the address stays fixed.
-WARNING: a `setRecipients` call made first, without a prior `setPayTo`,
-locks in variant A once a payment settles.
-
-For variant B the ordering is irreversible: **opt into USDC first, then rekey.**
-A rekeyed account cannot sign its own opt-in, and the application cannot opt it
-in beforehand.
+To map another auditor later, add the entry to `AUDITORS` and rerun step 2. `deployPaymentRouter`
+is idempotent for the same deployer and app name: it reuses the existing app and calls
+`setIdentity` again for the updated map, and refuses if the reused app's stored `payTo` or asset
+id disagrees with the current configuration.
 
 ---
 
-## 2. Configure and deploy the server
+## 3. Configure and start the server
 
-```bash
-cp .env.example .env    # then fill in
-```
-Set `NETWORK=mainnet`, `SPLIT_APP_ID`, `SPLIT_APP_ADDRESS`, `ATTEST_SIGNING_KEY`,
-`SPM_ISSUER_URL` (the real domain), `FACILITATOR_URL`, `ALGOD_SERVER`.
+This host runs one instance (SPEC.md §10.3, one writer). Before this deploy reuses the current
+TestNet host for MainNet, finish the TestNet move in `docs/TASK.md` item M0 — see
+`docs/DEPLOY-GUIDE.local.md` §3 for the move's steps.
 
-WARNING: the bootstrap block at the bottom of `.env.example` holds recipient
-mnemonics, needed once locally because an ASA opt-in must be signed by the
-account itself. **Delete that block from the server's `.env`.** The running
-server never needs a recipient key: it only receives USDC, and `distribute()`
-is permissionless.
+1. Set the server's `.env` or Portainer `stack.env` to hold only: `NETWORK=mainnet`,
+   `ALGOD_SERVER`, `INDEXER_URL`, `PAY_TO_ADDRESS`, `PAYMENT_ROUTER_APP_ID`,
+   `CREDITER_MNEMONIC`, `ATTEST_SIGNING_KEY`, `SPM_ISSUER_URL`, `SPM_KEY_VALID_FROM`,
+   `AUDITORS`, `SPM_BACKUP_HOST_DIR`, `PORT`, `TRUST_PROXY`, `FACILITATOR_URL`, `OPS_ADDRESS`.
+   Never `PAY_TO_MNEMONIC`, `DEPLOYER_MNEMONIC`, or an auditor's or donor's mnemonic.
+   Check: `grep -E 'MNEMONIC' .env` on the server prints only `CREDITER_MNEMONIC`.
 
-The attestation key is hot on the server by necessity. Keep it separate from
-payTo, admin and pool keys. It is unfunded and never used on-chain.
+2. `compose.yaml` refuses to start without `SPM_ISSUER_URL`, `SPM_KEY_VALID_FROM` and
+   `SPM_BACKUP_HOST_DIR`. `SPM_BACKUP_HOST_DIR` is a host directory, owned by uid 1000, bind-
+   mounted at `/backup`.
+   ```bash
+   sudo mkdir -p <path> && sudo chown 1000:1000 <path>
+   ```
+   Check: `docker compose config` prints the resolved service with no missing-variable error.
 
-Then deploy behind HTTPS on one root domain, and add `og:site_name`,
-`og:title`, `og:description` and `og:image` at the domain root for the Bazaar
-merchant card.
+3. Publish the image. Push a `v*` tag (the first release is `v0.1.0`, the version that
+   `compose.yaml` pins). `.github/workflows/image.yml` pushes `ghcr.io/triplight/spm-proxy:<tag>`.
+   After the first push, set the GHCR package to public once, in the GitHub package settings.
+   For a later release: push the new tag, then bump the `image:` line in `compose.yaml` in a
+   commit.
+   Check: `docker pull ghcr.io/triplight/spm-proxy:<tag>` succeeds with no login.
 
-```bash
-bash scripts/verify.sh   # the e2e step must now PASS, not SKIP
-```
-CAUTION: in the build sandbox the e2e step reports SKIP because the facilitator
-is unreachable. On a networked host it must turn into a real PASS. A SKIP there
-means the server cannot reach the facilitator, and no payment will settle.
+4. Point Portainer's stack at this repository and set the stack's environment variables in the
+   Portainer UI. Portainer writes them to `stack.env` next to `compose.yaml`. A push that bumps
+   the `image:` line, or a manual redeploy in Portainer, pulls the new commit and restarts the
+   container — no separate install step.
+   Check: the Portainer stack shows the `proxy` container as running, with the pinned image tag.
 
-The server refuses to boot when the facilitator does not advertise MainNet
-`exact`. That is deliberate. A boot failure here is a configuration problem,
-not a bug.
+5. Route the MainNet domain to this container through cloudflared, on this host. No cloudflared
+   configuration file is tracked in this repository. Set the ingress rule on the host to
+   `http://localhost:<PORT>`.
+   Check: `curl -s https://<mainnet-domain>/api/v1/status/ms/2.1.3` returns JSON.
 
----
+6. Start the stack (Portainer deploys it; on a host without Portainer, run the command below).
+   ```bash
+   docker compose up -d
+   ```
+   Check: the server logs the `feePayer` resolved from the facilitator's `getSupported()` at
+   boot and does not exit. At start, the nightly job runs once (no successful run exists yet).
+   After that run, `curl -s https://<mainnet-domain>/api/v1/health` returns 200. A 503 with
+   `"lastSuccess": null` means the run failed: read the log line `spm-nightly: failed — …`.
 
-## 3. Seed real reviews
-
-WARNING: a seeded `COMMUNITY_REVIEWED` record asserts that a human read that
-exact tarball. Section 7 of the spec forbids fabricating one, and a paid
-attestation repeating a fabricated record is the worst failure this product
-has.
-
-**A review record without a stored `integrity` resolves to `UNREVIEWED`.** This
-is enforced, not advisory. Seeding a review without the tarball hash produces
-nothing, by design: if SPM cannot say which tarball was read, it must not sell
-a claim about one.
-
-For each package, store name, version, tier, reviewer, review scope, the
-MainNet attest txid, and the tarball `integrity` from the npm registry.
-
-Target 15 to 30 small, ubiquitous packages that a human can genuinely review.
-Before reviewing, measure the hit rate: run the candidate list against 20 real
-`package-lock.json` files and record the median reviewed count in `NOTES.md`.
-That median sets the lockfile price. If it lands below 5, the seed list is
-wrong rather than the price.
-
-### Measure the hit rate
-
-Put one candidate package name per line in a text file. Use `#` for
-comments. Collect 20 real `package-lock.json` files, or point the script at
-a directory that contains them (it finds every `package-lock.json` inside,
-recursively, and skips `node_modules`).
-
-Run:
-
-```bash
-node scripts/hit-rate.mjs candidates.txt <lockfiles-dir>
-```
-
-The script prints a per-file hit count, the median, min, max, and how many
-lockfiles contain each candidate. It prints a WARNING when you give it
-fewer than 20 lockfiles, and a VERDICT line: `median >= 5` or `seed list
-too weak (median < 5)`.
-
-Record the median in `NOTES.md` before you seed any review.
+7. Add `og:site_name`, `og:title`, `og:description` and `og:image` at the domain root for the
+   Bazaar merchant card. No route in this repository serves them. They belong to the front page
+   deployed alongside the proxy.
+   Check: `curl -s https://<mainnet-domain>/ | grep -c 'og:'` prints 4 or more.
 
 ---
 
-## 4. Qualify
+## 4. Back up the database
 
-1. One real payment from a real wallet, not from localhost and not scripted.
-2. Confirm the resource appears in `/discovery/resources`.
-3. Confirm the merchant appears under `src=x402-global-challenge`.
-4. Reach the $0.10 floor, then call `distribute()`.
-5. Record the settle txid and the Lora link in `NOTES.md`.
+The nightly job (§6 below) writes a dated `audit-<timestamp>.db` copy into `/backup` (the
+`SPM_BACKUP_HOST_DIR` bind mount) before it credits a batch. A failed backup stops the job
+before it credits — nothing after a backup failure runs.
 
-```bash
-for s in x402-global-challenge bazaar direct dev; do
-  curl -s "https://facilitator.goplausible.xyz/data/leaderboards?cat=merchants&limit=200&range=all&env=mainnet&src=$s" \
-  | jq --arg a "$PAY_TO" '.items[] | select(.address==$a) | {rank,settles,volume}'; done
-```
-If volume lands under `dev` or `direct`, attribution is broken. Fix it before
-generating more traffic, because it does not migrate.
+Set up a Backrest plan on the host, outside this repository:
 
-CAUTION: the facilitator classifies localhost traffic, cron pings, retry storms
-and self-payment loops as `DEV`. Those settle for real and never count. Use
-event-triggered CI only, one wallet per adopting team, and no retry beyond the
-protocol's single retry.
+1. Add `SPM_BACKUP_HOST_DIR` to the plan.
+2. Schedule it daily, after 03:17 UTC — after the nightly job's own backup step.
+3. Exclude `.audit-*.db.tmp` (the nightly job's in-progress temp file).
+4. Set an alert to the operator on a snapshot error. This proxy runs no status check of its own
+   against the plan.
+
+Check: after one night, the newest `audit-*.db` file in `SPM_BACKUP_HOST_DIR` appears in the
+latest Backrest snapshot.
 
 ---
 
-## 5. Third-party donors
+## 5. Anchor and record real reviews
 
-This is the item the submission form asks about, and the only one whose
-latency is other people's.
+A review record without a real, on-chain-anchored review is a fabricated claim (CLAUDE.md
+invariant 5). No route or script in this repository writes a review row except
+`scripts/record-review.mjs`.
 
-Each donor needs the `spm-attest` Action merged, a MainNet address, a USDC
-opt-in, and a few dollars of Algorand-native USDC. Acquiring that USDC is the
-bottleneck: most people hold none on Algorand, and an exchange withdrawal takes
-days.
+1. **Auditor, on their own machine.** Read the tarball. Then:
+   ```bash
+   node scripts/anchor-review.mjs <name> <version> --reviewer <login> --scope "<what you read>" \
+     --key-file <path-to-mnemonic-file> --network mainnet --confirm-mainnet
+   ```
+   The key file holds one line, the auditor's mnemonic, and must not be readable by group or
+   other. Type `yes` at the prompt.
+   Check: the script prints the anchor's txid.
 
-Confirm each shows up as a distinct address under `cat=payers`. Team wallets
-are labelled as such in `NOTES.md` and in the submission.
+2. **Operator, on the server.**
+   ```bash
+   docker compose run --rm proxy node --import tsx/esm ../scripts/record-review.mjs <anchorTxid> \
+     --network mainnet
+   ```
+   This needs a TTY. Never run it with `-T` or from a non-interactive job. Type `yes` at the
+   prompt.
+   Check: `curl -s https://<mainnet-domain>/api/v1/status/<name>/<version>` reports
+   `COMMUNITY_REVIEWED` with the reviewer's login and the recorded integrity hash.
 
-The Action **fails open** by design: a facilitator outage, a 5xx or a missing
-wallet secret logs a warning and exits 0. Do not change that. An attestation
-step that reddens someone else's CI is removed from their repository the first
-time it does, and the volume goes with it.
+Target 3–5 anchored reviews before the first qualifying payment (`SPEC.md` §17, item Q4), then
+widen toward 15–30 using the hit-rate measurement in `docs/DEPLOY-GUIDE.local.md` §2.
 
 ---
 
 ## 6. The nightly job
 
-The proxy process schedules the nightly job itself: reconcile, back up, then
-credit (SPEC.md §13.2), daily at 03:17 UTC, plus a catch-up run at start when
-the last successful run is more than 24 hours old or none exists (ADR 0009).
-Nothing to install. A Portainer redeploy of the proxy container carries the
-schedule with it.
+The proxy process schedules its own nightly job: genesis check, then reconcile, then back up,
+then credit (ADR 0009, SPEC.md §13.2), daily at 03:17 UTC, plus a catch-up run at start when the
+last successful run is more than 24 hours old or none exists. A Portainer redeploy carries the
+schedule with it — nothing to install separately.
 
-`SPM_NIGHTLY=off` disables the schedule (`.env.example`). Any other value
-refuses to boot.
+`SPM_NIGHTLY=off` disables the schedule (`.env.example`). Any other value refuses to boot.
 
-Check `GET /api/v1/health` for the last run and the last success. It answers
-200 when the last success is at most 26 hours old, else 503.
+Check `GET /api/v1/health` for the last run and the last success. It answers 200 when the last
+success is at most 26 hours old, else 503. Point an uptime monitor at it.
 
 Run one pass by hand, for example right after a deploy:
 ```bash
-docker compose run --rm proxy pnpm nightly
+docker compose run --rm proxy node --import tsx/esm src/claims/nightly-main.ts
 ```
-A successful run logs `spm-nightly: credited batch N, txid ...` (or, with no
-`PAYMENT_ROUTER_APP_ID` yet, `spm-nightly: credit skipped — ...`) and exits
-0. This manual entry point (`nightly-main.ts`) takes the same SQLite lease as
-the in-process scheduler, so the two never run at once.
+A successful run logs `spm-nightly: credited batch N, txid ...`, or, with no
+`PAYMENT_ROUTER_APP_ID` set yet, a line naming why the credit step was skipped, and exits 0.
+This manual entry point takes the same SQLite lease as the in-process scheduler, so the two
+never run at once.
+
+Check: `curl -s https://<mainnet-domain>/api/v1/health` shows the run just completed.
 
 ---
 
-## 7. Known open items
+## 7. Claim a credited balance
 
-- **Legal.** SPM will hold funds owed to third parties. For a German operator
-  that may touch payment-services regulation. Get advice before paying anyone
-  outside the team. It is not judged in the competition; it is personal
-  exposure.
+An identity's mapped address claims its whole balance once it reaches `MIN_CLAIM` (100,000
+microUSDC).
+
+```bash
+node scripts/claim.mjs <identity> <CLAIMANT_MNEMONIC_ENV_VAR> --network mainnet --confirm-mainnet
+```
+`<identity>` is `github:<login>` for an auditor, or `ops` for the ops pool. The script refuses
+locally, before sending anything, when the balance is below `MIN_CLAIM` or the signer is not the
+mapped address.
+
+Check: the script prints the claim txid. The claimant's USDC balance increases by the claimed
+amount.
 
 ---
 
-## 8. State at handoff
+## 8. Qualify
 
-| Check | Result |
-|---|---|
-| proxy tests | 306 |
-| cli tests | 16 |
-| contracts tests | 16 |
-| mcp tests | 8 |
-| Action tests | 9 |
-| `pnpm typecheck` | passes |
-| `scripts/guard.sh` | clean |
-| `pnpm exec biome ci .` | exit 0, zero warnings |
-| `bash scripts/verify.sh` | exit 0, e2e SKIP pending network |
+1. Check attribution before the first real payment.
+   ```bash
+   node scripts/check-402.mjs "https://<mainnet-domain>/v1/attest?name=ms&version=2.1.3"
+   ```
+   Check: exits 0, prints PASS for `extra.tag`, `extra.asset`, `network` and `extra.feePayer`.
+2. One real payment from a real wallet, not from localhost and not scripted.
+   Check: the resource appears under `/discovery/resources`. The merchant appears under
+   `src=x402-global-challenge` on the facilitator's leaderboard.
+3. Record the settle txid and the leaderboard result in `NOTES.md`.
+   Check: `NOTES.md` carries a dated entry with the settle txid.
 
-`SPEC.md` is the authoritative spec, corrected against what implementation
-measured.
+```bash
+for s in x402-global-challenge bazaar direct dev; do
+  curl -s "https://facilitator.goplausible.xyz/data/leaderboards?cat=merchants&limit=200&range=all&env=mainnet&src=$s" \
+  | jq --arg a "<PAY_TO_ADDRESS>" '.items[] | select(.address==$a) | {rank,settles,volume}'; done
+```
+If volume lands under `dev` or `direct`, attribution never went live before the payment settled.
+Fix the tag first. A misattributed payment does not migrate.
+
+The facilitator classifies localhost traffic, cron pings, retry storms and self-payment loops as
+`DEV`. Those settle for real and never count. Use event-triggered CI only, one wallet per
+adopting team, and no retry beyond the protocol's single retry.
+
+---
+
+## 9. Third-party donors
+
+Each donor needs the `spm-attest` Action merged into their repository, a MainNet address, a
+USDC opt-in, and a few dollars of Algorand-native USDC. Acquiring that USDC is the slow step:
+most people hold none on Algorand, and an exchange withdrawal takes days.
+
+Check that each donor shows up as a distinct address under `cat=payers` on the facilitator's
+leaderboard. Team wallets are labelled as such in `NOTES.md` and in the submission.
+
+The Action fails open by design: a facilitator outage, a 5xx, or a missing wallet secret logs an
+alert and exits 0. Keep it that way — an attestation step that fails a third party's CI gets
+removed from their repository the first time it does, and the donation volume goes with it.
+
+---
+
+## 10. Known open items
+
+**Legal.** SPM holds funds owed to third parties. For a German operator this may touch
+payment-services regulation. Get advice before paying anyone outside the team. It carries no
+weight in the competition. It is personal exposure.
