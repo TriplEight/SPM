@@ -362,13 +362,15 @@ only writer (ADR 0001).
 5. SQLite records each run: start, end, result, error, batch, credit txid.
 6. `GET /api/v1/health` (free) returns the last run and the last success. It returns 200 when the
    last success is at most 26 hours old, else 503.
-7. Delete `deploy/systemd/`. Update every reference to it. Update SPEC §13.2 and add ADR 0009.
+7. `SPM_NIGHTLY` (default `on`) turns the scheduler off. The proxy test that boots the server and
+   the e2e rehearsal proxy set `off`. Another value refuses to boot.
+8. Delete `deploy/systemd/`. Update every reference to it. Update SPEC §13.2 and add ADR 0009.
 
 Acceptance: tests for the next-run time, the start-up catch-up, the lease overlap, the lease
 expiry, a failed run that does not stop the server, and the health route (200 and 503).
 Owner: `x402-proxy-engineer`.
 
-### N2. CI image
+### N2. CI image — DONE b971d8a
 
 A GitHub Actions workflow builds `proxy/Dockerfile`. On a `v*` tag it pushes
 `ghcr.io/triplight/spm-proxy:<tag>` (public package). On a pull request it builds without a push.
