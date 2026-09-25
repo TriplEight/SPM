@@ -396,7 +396,7 @@ Result: the test starts the server so that one kill stops the whole tree (for ex
 Check: after `pnpm -C proxy test`, `ss -ltnp` shows no listener on the test ports.
 Owner: `x402-proxy-engineer`.
 
-### D1. Rewrite the operator docs (last)
+### D1. Rewrite the operator docs (last) — DONE e64157e
 
 After the tracks are merged and `verify.sh` passes:
 1. Rewrite `docs/RUNBOOK-mainnet-launch.md` from the new code. It still describes SplitRouter
