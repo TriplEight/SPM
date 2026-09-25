@@ -84,11 +84,11 @@ TestNet host for MainNet, finish the TestNet move in `docs/TASK.md` item M0 — 
    Check: `docker compose config` prints the resolved service with no missing-variable error.
 
 3. Publish the image. Push a `v*` tag (the first release is `v0.1.0`, the version that
-   `compose.yaml` pins). `.github/workflows/image.yml` pushes `ghcr.io/triplight/spm:<tag>`.
+   `compose.yaml` pins). `.github/workflows/image.yml` pushes `ghcr.io/tripleight/spm:<tag>`.
    After the first push, set the GHCR package to public once, in the GitHub package settings.
    For a later release: push the new tag, then bump the `image:` line in `compose.yaml` in a
    commit.
-   Check: `docker pull ghcr.io/triplight/spm:<tag>` succeeds with no login.
+   Check: `docker pull ghcr.io/tripleight/spm:<tag>` succeeds with no login.
 
 4. Point Portainer's stack at this repository and set the stack's environment variables in the
    Portainer UI. Portainer writes them to `stack.env` next to `compose.yaml`. A push that bumps
