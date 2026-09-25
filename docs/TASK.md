@@ -387,7 +387,7 @@ Acceptance: tests for unset, malformed and valid values on both networks. Owner:
 - **Wave 4:** R3 → R3a → Q13 → R3b → R3c → R3d → R3e → R4 → S1 → D1 → M0 → MainNet rekey
   and first credit.
 
-### S1. Dependency advisories
+### S1. Dependency advisories — DONE 349de5c
 
 `pnpm audit --audit-level=moderate` reports 47 advisories on `master` (for example `hono`,
 `@hono/node-server`, `brace-expansion`, `fast-uri`). `hono` and `@hono/node-server` are proxy
