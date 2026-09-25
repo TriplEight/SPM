@@ -339,6 +339,15 @@ Result, in two parts:
 
 Acceptance: the txid of each step is in `NOTES.md`.
 
+### M0. Move the TestNet deployment (human, before the MainNet deploy)
+
+TestNet and MainNet run on separate hosts, one instance per host. The current TestNet host
+becomes the MainNet host. Before the MainNet deploy, the operator moves TestNet to its own host:
+1. Copy `audit.db` from the old volume, or run `record-review` again for each anchor.
+2. Set a new `SPM_ISSUER_URL` and a new `SPM_KEY_VALID_FROM`.
+
+Check: the status route on the new TestNet host shows the recorded reviews.
+
 ### D1. Rewrite the operator docs (last)
 
 After the tracks are merged and `verify.sh` passes:
@@ -375,7 +384,8 @@ Acceptance: tests for unset, malformed and valid values on both networks. Owner:
 - **Wave 2:** Q2 → Q3; Q4; Q6; Q8; H3.
 - **Wave 3:** Q7; Q11; Q12; R2. H2 when the user is present.
 - **Qualification (human, by Sept 25):** SPEC §17 Q steps 1–6 on MainNet.
-- **Wave 4:** R3 → R3a → Q13 → R3b → R3c → R3d → R3e → R4 → MainNet rekey and first credit → D1.
+- **Wave 4:** R3 → R3a → Q13 → R3b → R3c → R3d → R3e → R4 → S1 → D1 → M0 → MainNet rekey
+  and first credit.
 
 ### S1. Dependency advisories
 
