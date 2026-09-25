@@ -243,49 +243,28 @@ time it does, and the volume goes with it.
 
 ---
 
-## 6. Schedule the reconciliation job
+## 6. The nightly job
 
-`pnpm -C proxy reconcile` (`proxy/src/claims/reconcile-main.ts`) runs the
-claims-ledger reconciliation pass. Nothing schedules it by default. Install
-the systemd units in `deploy/systemd/` to run it nightly.
+The proxy process schedules the nightly job itself: reconcile, back up, then
+credit (SPEC.md §13.2), daily at 03:17 UTC, plus a catch-up run at start when
+the last successful run is more than 24 hours old or none exists (ADR 0009).
+Nothing to install. A Portainer redeploy of the proxy container carries the
+schedule with it.
 
-1. Copy both unit files to the host:
-   ```bash
-   sudo cp deploy/systemd/spm-reconcile.service deploy/systemd/spm-reconcile.timer /etc/systemd/system/
-   ```
-2. Edit `/etc/systemd/system/spm-reconcile.service`. Each line marked `EDIT`
-   needs a real value:
-   - `WorkingDirectory`: the deployed `proxy/` path (for example
-     `/opt/spm/proxy`).
-   - `ExecStart`: the absolute path to `node` for the `spm` user. Check with
-     `sudo -u spm which node`. `ProtectHome=true` blocks `/home`, so `node`
-     must live outside it (for example `/usr/bin/node`).
-   - `ReadWritePaths`: the directory that holds `audit.db`. This is
-     `WorkingDirectory` unless the server's `.env` sets `SQLITE_PATH` to
-     somewhere else (`proxy/src/db.ts`).
-3. Create the `spm` user, if it does not exist yet:
-   ```bash
-   sudo useradd --system --no-create-home --shell /usr/sbin/nologin spm
-   ```
-4. Load and enable the timer:
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now spm-reconcile.timer
-   ```
-5. Check the timer is scheduled:
-   ```bash
-   systemctl list-timers spm-reconcile.timer
-   ```
-6. Run one pass by hand and check the log:
-   ```bash
-   sudo systemctl start spm-reconcile.service
-   journalctl -u spm-reconcile.service
-   ```
-   A successful run logs `spm-reconcile: checked N inflow(s)` and exits 0.
+`SPM_NIGHTLY=off` disables the schedule (`.env.example`). Any other value
+refuses to boot.
 
-The reconcile runner only reads the chain through the indexer and the local
-`audit.db`. It never signs or submits a transaction, so the unit needs no
-mnemonic and no wallet secret.
+Check `GET /api/v1/health` for the last run and the last success. It answers
+200 when the last success is at most 26 hours old, else 503.
+
+Run one pass by hand, for example right after a deploy:
+```bash
+docker compose run --rm proxy pnpm nightly
+```
+A successful run logs `spm-nightly: credited batch N, txid ...` (or, with no
+`PAYMENT_ROUTER_APP_ID` yet, `spm-nightly: credit skipped — ...`) and exits
+0. This manual entry point (`nightly-main.ts`) takes the same SQLite lease as
+the in-process scheduler, so the two never run at once.
 
 ---
 

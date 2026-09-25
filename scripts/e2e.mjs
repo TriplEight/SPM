@@ -672,6 +672,13 @@ function buildRehearsalProxyEnv({ port, sqlitePath, payToAddress, attestSigningK
     ALGOD_SERVER: process.env.ALGOD_SERVER ?? 'https://testnet-api.algonode.cloud',
     ALGOD_PORT: process.env.ALGOD_PORT ?? '443',
     ALGOD_TOKEN: process.env.ALGOD_TOKEN ?? '',
+    // The in-process nightly scheduler (ADR 0009) is off for this rehearsal
+    // proxy: its start-up catch-up run would call out to the default
+    // MainNet indexer/algod (this env sets no INDEXER_URL, and NETWORK is
+    // testnet here) — a live network call this rehearsal does not expect.
+    // runOnChainRehearsal runs the nightly job itself, explicitly, as its
+    // own subprocess (runNightlySubprocess, buildRehearsalNightlyEnv).
+    SPM_NIGHTLY: 'off',
   }
 }
 
