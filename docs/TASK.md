@@ -203,7 +203,7 @@ Result (SPEC §13.2, ADR 0001, ADR 0005):
 - Unmatched inflows are ledgered as `unassigned` ops income and go into
   `unattributedTotal`.
 - Replace `deploy/systemd/spm-reconcile.*` with `spm-nightly.*`, which runs
-  `docker compose run --rm proxy <nightly command>`.
+  `docker compose run --rm spm <nightly command>`.
 
 Acceptance: tests for a backup failure (no credit), an unset app id (no credit, exit 0), a
 batch whose txid is recorded (never re-sent), and batch totals equal to the ledger sums.
@@ -373,14 +373,14 @@ Owner: `x402-proxy-engineer`.
 ### N2. CI image — DONE b971d8a
 
 A GitHub Actions workflow builds `proxy/Dockerfile`. On a `v*` tag it pushes
-`ghcr.io/triplight/spm-proxy:<tag>` (public package). On a pull request it builds without a push.
+`ghcr.io/triplight/spm:<tag>` (public package). On a pull request it builds without a push.
 Actions are pinned to commit SHAs. `actionlint` and `zizmor` pass. Permissions are least
 privilege (`packages: write` only on the push job).
 
 ### N3. Compose for Portainer — DONE 61dbb8a
 
 One `compose.yaml` for the local machine and for Portainer:
-1. `image:` pins `ghcr.io/triplight/spm-proxy:<version>`. `build:` stays for a local build.
+1. `image:` pins `ghcr.io/triplight/spm:<version>`. `build:` stays for a local build.
 2. The environment comes from `.env` or from Portainer's `stack.env`. Each file is optional.
 3. The nightly job needs no `docker compose run` (N1). The backup bind mount stays.
 

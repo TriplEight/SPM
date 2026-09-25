@@ -84,17 +84,17 @@ TestNet host for MainNet, finish the TestNet move in `docs/TASK.md` item M0 — 
    Check: `docker compose config` prints the resolved service with no missing-variable error.
 
 3. Publish the image. Push a `v*` tag (the first release is `v0.1.0`, the version that
-   `compose.yaml` pins). `.github/workflows/image.yml` pushes `ghcr.io/triplight/spm-proxy:<tag>`.
+   `compose.yaml` pins). `.github/workflows/image.yml` pushes `ghcr.io/triplight/spm:<tag>`.
    After the first push, set the GHCR package to public once, in the GitHub package settings.
    For a later release: push the new tag, then bump the `image:` line in `compose.yaml` in a
    commit.
-   Check: `docker pull ghcr.io/triplight/spm-proxy:<tag>` succeeds with no login.
+   Check: `docker pull ghcr.io/triplight/spm:<tag>` succeeds with no login.
 
 4. Point Portainer's stack at this repository and set the stack's environment variables in the
    Portainer UI. Portainer writes them to `stack.env` next to `compose.yaml`. A push that bumps
    the `image:` line, or a manual redeploy in Portainer, pulls the new commit and restarts the
    container — no separate install step.
-   Check: the Portainer stack shows the `proxy` container as running, with the pinned image tag.
+   Check: the Portainer stack shows the `spm` container as running, with the pinned image tag.
 
 5. Route the MainNet domain to this container through cloudflared, on this host. No cloudflared
    configuration file is tracked in this repository. Set the ingress rule on the host to
@@ -153,7 +153,7 @@ invariant 5). No route or script in this repository writes a review row except
 
 2. **Operator, on the server.**
    ```bash
-   docker compose run --rm proxy node --import tsx/esm ../scripts/record-review.mjs <anchorTxid> \
+   docker compose run --rm spm node --import tsx/esm ../scripts/record-review.mjs <anchorTxid> \
      --network mainnet
    ```
    This needs a TTY. Never run it with `-T` or from a non-interactive job. Type `yes` at the
@@ -180,7 +180,7 @@ success is at most 26 hours old, else 503. Point an uptime monitor at it.
 
 Run one pass by hand, for example right after a deploy:
 ```bash
-docker compose run --rm proxy node --import tsx/esm src/claims/nightly-main.ts
+docker compose run --rm spm node --import tsx/esm src/claims/nightly-main.ts
 ```
 A successful run logs `spm-nightly: credited batch N, txid ...`, or, with no
 `PAYMENT_ROUTER_APP_ID` set yet, a line naming why the credit step was skipped, and exits 0.

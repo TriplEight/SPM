@@ -1,6 +1,6 @@
 # The proxy process schedules the nightly job
 
-A host timer unit ran `nightly-main.ts` outside the proxy container. It needed its own unit
+A host timer unit ran `nightly-main.ts` outside the `spm` container. It needed its own unit
 files, its own host user, and its own install step, and it left the running server with no way
 to report the job's own health. The MVP runs one proxy process with one writer (ADR 0001); that
 process can schedule its own daily job just as well as a host timer can, with one fewer moving
@@ -19,7 +19,7 @@ is more than 26 hours old.
 ## Consequences
 
 - The host timer unit files are deleted. No host unit to install, edit, or enable.
-- A Portainer redeploy of the proxy container carries the schedule with it — no separate step.
+- A Portainer redeploy of the `spm` container carries the schedule with it — no separate step.
 - A failed run logs `spm-nightly: failed — <reason>` and never stops the server; an operator (or
   monitoring) reads the failure from `GET /api/v1/health` or the log line, not from a lost
   process.
