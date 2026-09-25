@@ -332,10 +332,10 @@ Result, in two parts:
    250 reviewed entries (250,000 µUSDC) → nightly job credits batch 1 → `claim()` for the
    auditor (100,000) and for ops (150,000). One tarball payment credits only 400 / 600, below
    `MIN_CLAIM`, so the rehearsal uses 250 entries. The contract stays unchanged.
-2. Persistent TestNet deploy — DONE 2026-09-25, as on MainNet: the operator's `payTo` opt-in → deploy
-   PaymentRouter → rekey → Compose at the TestNet domain → one real anchored review → one
-   payment through GoPlausible → nightly job (backup, credit batch 1). Deployed app 772553842;
-   the step guide is in `NOTES.md`.
+2. Persistent TestNet deploy — DONE 2026-09-25, as on MainNet: the operator's `payTo`
+   opt-in → deploy PaymentRouter → rekey → Compose at the TestNet domain → one real anchored
+   review → one payment through GoPlausible → nightly job (backup, credit batch 1). Deployed
+   app 772553842; the step guide is in `NOTES.md`.
 
 Acceptance: the txid of each step is in `NOTES.md`.
 
@@ -423,8 +423,8 @@ Acceptance: tests for unset, malformed and valid values on both networks. Owner:
 - **Wave 2:** Q2 → Q3; Q4; Q6; Q8; H3.
 - **Wave 3:** Q7; Q11; Q12; R2. H2 when the user is present.
 - **Qualification (human, by Sept 25):** SPEC §17 Q steps 1–6 on MainNet.
-- **Wave 4:** R3 → R3a → Q13 → R3b → R3c → R3d → R3e → R4 → S1 → (N1 ‖ N2) → N3 → D1 → M0 → MainNet rekey
-  and first credit.
+- **Wave 4:** R3 → R3a → Q13 → R3b → R3c → R3d → R3e → R4 → S1 → (N1 ‖ N2) → N3 → D1 → M0
+  → MainNet rekey and first credit.
 
 ### S1. Dependency advisories — DONE 349de5c
 
