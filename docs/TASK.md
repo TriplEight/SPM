@@ -348,6 +348,43 @@ becomes the MainNet host. Before the MainNet deploy, the operator moves TestNet 
 
 Check: the status route on the new TestNet host shows the recorded reviews.
 
+### N1. Nightly scheduler inside the proxy
+
+The proxy process runs the nightly job. The host systemd timer is removed. One process stays the
+only writer (ADR 0001).
+1. The server entry point schedules `runNightly()` every day at 03:17 UTC.
+2. At start, if the last successful run is more than 24 hours old, or no run exists, the server
+   runs the job once.
+3. A failed run logs `spm-nightly: failed — <reason>` and never stops the server.
+4. A lease in SQLite stops two runs from overlapping. `nightly-main.ts` stays as the operator's
+   manual entry point and takes the same lease. A second run exits with a clear message.
+   A lease older than one hour counts as released.
+5. SQLite records each run: start, end, result, error, batch, credit txid.
+6. `GET /api/v1/health` (free) returns the last run and the last success. It returns 200 when the
+   last success is at most 26 hours old, else 503.
+7. Delete `deploy/systemd/`. Update every reference to it. Update SPEC §13.2 and add ADR 0009.
+
+Acceptance: tests for the next-run time, the start-up catch-up, the lease overlap, the lease
+expiry, a failed run that does not stop the server, and the health route (200 and 503).
+Owner: `x402-proxy-engineer`.
+
+### N2. CI image
+
+A GitHub Actions workflow builds `proxy/Dockerfile`. On a `v*` tag it pushes
+`ghcr.io/triplight/spm-proxy:<tag>` (public package). On a pull request it builds without a push.
+Actions are pinned to commit SHAs. `actionlint` and `zizmor` pass. Permissions are least
+privilege (`packages: write` only on the push job).
+
+### N3. Compose for Portainer
+
+One `compose.yaml` for the local machine and for Portainer:
+1. `image:` pins `ghcr.io/triplight/spm-proxy:<version>`. `build:` stays for a local build.
+2. The environment comes from `.env` or from Portainer's `stack.env`. Each file is optional.
+3. The nightly job needs no `docker compose run` (N1). The backup bind mount stays.
+
+Check: `docker compose config` passes with only `.env`, and with only `stack.env`.
+Owner: `x402-proxy-engineer`. After N1 and N2.
+
 ### D1. Rewrite the operator docs (last)
 
 After the tracks are merged and `verify.sh` passes:
@@ -363,11 +400,13 @@ After the tracks are merged and `verify.sh` passes:
 5. Remove the WARNING banners from both runbooks.
 6. Backup (decided: the host's restic/Backrest plan, no status check in SPM).
    `SPM_BACKUP_HOST_DIR` is a local directory owned by uid 1000. The Backrest plan includes it,
-   runs daily after the nightly timer (03:17 UTC), excludes `.audit-*.db.tmp`, and alerts the
+   runs daily after the nightly job (03:17 UTC), excludes `.audit-*.db.tmp`, and alerts the
    operator on a snapshot error. Check: after one night, the newest `audit-*.db` is in the
    latest snapshot.
-7. TestNet and MainNet share one host: document a separate directory, Compose project name,
-   port, volume, nightly unit and `cloudflared` ingress rule for each.
+7. One instance per host. TestNet runs behind traefik, MainNet behind cloudflared. Document the
+   Portainer stack (N3), the reverse-proxy rule for each, and the M0 move. Do not name a domain.
+8. The donor guide sets the donor key from a secret manager for one command only. The key
+   never sits in a `.env` file.
 
 ### Q13. Issuer URL and key date required on every network — DONE c65edd5
 
@@ -384,7 +423,7 @@ Acceptance: tests for unset, malformed and valid values on both networks. Owner:
 - **Wave 2:** Q2 → Q3; Q4; Q6; Q8; H3.
 - **Wave 3:** Q7; Q11; Q12; R2. H2 when the user is present.
 - **Qualification (human, by Sept 25):** SPEC §17 Q steps 1–6 on MainNet.
-- **Wave 4:** R3 → R3a → Q13 → R3b → R3c → R3d → R3e → R4 → S1 → D1 → M0 → MainNet rekey
+- **Wave 4:** R3 → R3a → Q13 → R3b → R3c → R3d → R3e → R4 → S1 → (N1 ‖ N2) → N3 → D1 → M0 → MainNet rekey
   and first credit.
 
 ### S1. Dependency advisories — DONE 349de5c
