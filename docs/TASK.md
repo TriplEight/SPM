@@ -377,7 +377,7 @@ A GitHub Actions workflow builds `proxy/Dockerfile`. On a `v*` tag it pushes
 Actions are pinned to commit SHAs. `actionlint` and `zizmor` pass. Permissions are least
 privilege (`packages: write` only on the push job).
 
-### N3. Compose for Portainer
+### N3. Compose for Portainer — DONE 61dbb8a
 
 One `compose.yaml` for the local machine and for Portainer:
 1. `image:` pins `ghcr.io/triplight/spm-proxy:<version>`. `build:` stays for a local build.
@@ -386,6 +386,15 @@ One `compose.yaml` for the local machine and for Portainer:
 
 Check: `docker compose config` passes with only `.env`, and with only `stack.env`.
 Owner: `x402-proxy-engineer`. After N1 and N2.
+
+### T1. Stray test processes
+
+`proxy/src/index.test.ts` spawns the server through `pnpm` → `tsx` → `node`. `SIGKILL` stops only
+the top process. The `node` child can stay alive and hold a fixed test port in the next run.
+Result: the test starts the server so that one kill stops the whole tree (for example `node
+--import tsx/esm` directly, or a process group), and each test uses a free port.
+Check: after `pnpm -C proxy test`, `ss -ltnp` shows no listener on the test ports.
+Owner: `x402-proxy-engineer`.
 
 ### D1. Rewrite the operator docs (last)
 
