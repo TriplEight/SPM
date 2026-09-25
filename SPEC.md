@@ -907,8 +907,10 @@ The ledger is the crediter's input queue and the audit trail. PaymentRouter hold
 the response carries `PAYMENT-RESPONSE` with success, decode the settle txid and write accruals
 from attribution data the handler put on the context (`c.set('attribution', …)`).
 
-**Nightly job (one job, one timer):** a host systemd timer runs it in the proxy image
-(`docker compose run --rm proxy …`). In order:
+**Nightly job (one job, in-process):** the proxy process itself runs it, daily at 03:17 UTC, and
+catches up once at start when the last successful run is more than 24 hours old or none exists
+(ADR 0009). `SPM_NIGHTLY=off` disables the schedule. `nightly-main.ts` stays the manual entry
+point for an operator-run pass. In order:
 1. **Reconcile.** List USDC axfers into `payTo` (indexer, `INDEXER_URL`) and compare them with
    ledger `settle_txid`s. An unmatched inflow (crash between settle and write, direct deposit)
    is ledgered as `unassigned` ops income. Skip inflows confirmed less than 900 seconds ago
